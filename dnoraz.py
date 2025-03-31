@@ -7,6 +7,11 @@ import logging
 import asyncio
 import secrets
 import string
+import locale
+
+import sys
+import io
+
 from datetime import datetime, timedelta
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -22,9 +27,25 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import requests
 from fastapi import FastAPI, Request
 
+# Устанавливаем UTF-8 кодировку для всего скрипта
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+locale.setlocale(locale.LC_ALL, 'ru_RU.UTF-8')
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ],
+    encoding='utf-8'
+)
+logger = logging.getLogger(__name__)
+
 # Конфигурация
 BOT_USERNAME = 'OdnorazkiGash_bot'
-TOKEN = "7683476302:AAFIG1xhxu_nlr0QwL0ODILT9X_DXCYaEqw"
+TOKEN = "7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE"
 CRYPTOBOT_TOKEN = "362476:AAm3PuFC1uXxJEjnEyXfVGJ40GoKhHWLYY0"
 CRYPTOBOT_API = "https://pay.crypt.bot/api"
 ADMIN_ID = "1470249044"
@@ -49,6 +70,7 @@ def check_db():
         payment_received INTEGER DEFAULT 0,
         payment_amount REAL,
         payment_date TEXT,
+        payment_tx TEXT,
         FOREIGN KEY (worker_id) REFERENCES workers(worker_id)
     )''')
 
@@ -86,6 +108,7 @@ def init_db():
         payment_received INTEGER DEFAULT 0,
         payment_amount REAL DEFAULT 0,
         payment_date TEXT,
+        payment_tx TEXT,
         FOREIGN KEY (worker_id) REFERENCES workers (worker_id)
     )''')
 
@@ -95,6 +118,7 @@ def init_db():
         payment_id INTEGER PRIMARY KEY AUTOINCREMENT,
         invoice_id TEXT UNIQUE,
         user_id INTEGER,
+        worker_code TEXT,
         amount REAL,
         product_id TEXT,
         status TEXT DEFAULT 'pending',
@@ -104,52 +128,6 @@ def init_db():
 
     conn.commit()
     conn.close()
-
-
-
-def setup_webhook():
-    response = requests.post(
-        f"{CRYPTOBOT_API}/setWebhook",
-        headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
-        json={
-            "url": "https://ваш-сервер.com/cryptobot_webhook",
-            "events": ["invoice_paid"]
-        }
-    )
-    print("Webhook setup:", response.json())
-
-# Вызовите один раз при запуске
-setup_webhook()
-async def check_worker_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проверка статистики воркера (только оплаты и профит)"""
-    try:
-        if not context.args:
-            await update.message.reply_text("❌ Укажите код воркера!")
-            return
-
-        worker_code = context.args[0]
-        conn = sqlite3.connect('workers.db')
-
-        try:
-            cursor = conn.cursor()
-            cursor.execute('SELECT telegram_id FROM workers WHERE worker_code = ?', (worker_code,))
-            if not (worker_data := cursor.fetchone()):
-                await update.message.reply_text("❌ Воркер не найден!")
-                return
-
-            stats = get_worker_stats(worker_data[0])
-            await update.message.reply_text(
-                f"📊 Статистика воркера {worker_code}:\n"
-                f"💰 Оплаты: {stats['payments']}\n"
-                f"💵 Профит: {stats['profit']:.2f} USDT\n"
-                f"🔄 Обновлено: {stats['last_update']}",
-                parse_mode='HTML'
-            )
-        finally:
-            conn.close()
-    except Exception as e:
-        print(f"Ошибка в check_worker_stats: {e}")
-        await update.message.reply_text("⚠️ Ошибка при проверке статистики")
 
 
 def get_worker_stats(worker_id: int) -> dict:
@@ -183,6 +161,37 @@ def get_worker_stats(worker_id: int) -> dict:
         print(f"Error in get_worker_stats: {str(e)}")
 
     return stats
+
+async def check_worker_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Проверка статистики воркера (только оплаты и профит)"""
+    try:
+        if not context.args:
+            await update.message.reply_text("❌ Укажите код воркера!")
+            return
+
+        worker_code = context.args[0]
+        conn = sqlite3.connect('workers.db')
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT telegram_id FROM workers WHERE worker_code = ?', (worker_code,))
+            if not (worker_data := cursor.fetchone()):
+                await update.message.reply_text("❌ Воркер не найден!")
+                return
+
+            stats = get_worker_stats(worker_data[0])
+            await update.message.reply_text(
+                f"📊 Статистика воркера {worker_code}:\n"
+                f"💰 Оплаты: {stats['payments']}\n"
+                f"💵 Профит: {stats['profit']:.2f} USDT\n"
+                f"🔄 Обновлено: {stats['last_update']}",
+                parse_mode='HTML'
+            )
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Ошибка в check_worker_stats: {e}")
+        await update.message.reply_text("⚠️ Ошибка при проверке статистики")
 
 
 async def worker_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -267,7 +276,62 @@ def generate_ref_link(worker_code):
     return f"https://t.me/{BOT_USERNAME}?start=ref_{worker_code}"
 
 
-
+async def check_payments(context: ContextTypes.DEFAULT_TYPE):
+    """Периодическая проверка неоплаченных платежей"""
+    try:
+        conn = sqlite3.connect('workers.db')
+        cursor = conn.cursor()
+        
+        # Получаем все pending платежи
+        cursor.execute('''
+        SELECT invoice_id, user_id, worker_code, amount, product_id 
+        FROM payments 
+        WHERE status = 'pending'
+        ''')
+        pending_payments = cursor.fetchall()
+        
+        for payment in pending_payments:
+            invoice_id, user_id, worker_code, amount, product_id = payment
+            
+            # Проверяем статус через API
+            response = requests.get(
+                f"{CRYPTOBOT_API}/getInvoices",
+                headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
+                params={"invoice_ids": invoice_id}
+            )
+            
+            data = response.json()
+            if data.get('result'):
+                invoice = data['result'][0]
+                if invoice['status'] == 'paid':
+                    # Обновляем статус платежа
+                    cursor.execute('''
+                    UPDATE payments SET status = 'paid', updated_at = ?
+                    WHERE invoice_id = ?
+                    ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), invoice_id))
+                    
+                    # Находим worker_id
+                    cursor.execute('''
+                    SELECT worker_id FROM workers WHERE worker_code = ?
+                    ''', (worker_code,))
+                    worker = cursor.fetchone()
+                    worker_id = worker[0] if worker else None
+                    
+                    # Отправляем уведомление админу
+                    if worker_id:
+                        await context.bot.send_message(
+                            chat_id=1470249044,
+                            text=f"💸 Новая оплата!\n"
+                                 f"👷 Worker ID: {worker_id}\n"
+                                 f"💰 Профит: {amount} USDT"
+                        )
+                    
+                    conn.commit()
+                    
+    except Exception as e:
+        print(f"Ошибка при проверке платежей: {e}")
+    finally:
+        conn.close()
 
 
 
@@ -323,7 +387,7 @@ def verify_db_structure():
 
 
 # В начале main() добавьте:
-print("=== Запуск бота ===")
+logger.info("=== Запуск бота ===")
 verify_db_structure()
 # Модифицированная функция для работы с базой данных
 async def update_worker_stats():
@@ -632,20 +696,33 @@ async def show_product(update: Update, product_id: str) -> None:
     )
 
 
-# Модифицируем функцию show_payment
+# Модифицируем функцию show_payment (упрощаем, убираем вебхук-логику)
 async def show_payment(update: Update, product_id: str) -> None:
-    """Создание платежа с привязкой к воркеру"""
+    """Создание платежа"""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
 
     try:
         product = PRODUCTS_DATA[product_id]
-        # Получаем цену из продукта (например "60 usdt" -> 60)
-        amount = float(product['price'].split()[0])  # Извлекаем числовое значение цены
+        amount = float(product['price'].split()[0])
 
-        # Получаем код воркера
+        # Создаем инвойс
+        response = requests.post(
+            f"{CRYPTOBOT_API}/createInvoice",
+            headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
+            json={
+                "asset": "USDT",
+                "amount": str(amount),
+                "description": f"Покупка: {product['name']}",
+                "paid_btn_url": f"https://t.me/{BOT_USERNAME}"
+            }
+        )
+        invoice = response.json()['result']
+
+        # Сохраняем платеж
         with sqlite3.connect('workers.db') as conn:
+            # Получаем код воркера
             cursor = conn.cursor()
             cursor.execute('''
             SELECT w.worker_code FROM referrals r
@@ -656,29 +733,7 @@ async def show_payment(update: Update, product_id: str) -> None:
             result = cursor.fetchone()
             worker_code = result[0] if result else "UNKNOWN"
 
-        # Формируем payload с данными о воркере
-        payload = {
-            "asset": "USDT",
-            "amount": str(amount),
-            "description": f"Покупка: {product['name']}",
-            "payload": json.dumps({
-                "user_id": user_id,
-                "worker_code": worker_code,
-                "product_id": product_id
-            }),
-            "paid_btn_url": f"https://t.me/{BOT_USERNAME}"
-        }
-
-        # Создаем инвойс
-        response = requests.post(
-            f"{CRYPTOBOT_API}/createInvoice",
-            headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
-            json=payload
-        )
-        invoice = response.json()['result']
-
-        # Сохраняем платеж
-        with sqlite3.connect('workers.db') as conn:
+            # Сохраняем платеж
             conn.execute('''
             INSERT INTO payments (invoice_id, user_id, worker_code, amount, product_id, status, created_at)
             VALUES (?, ?, ?, ?, ?, 'pending', ?)
@@ -694,7 +749,7 @@ async def show_payment(update: Update, product_id: str) -> None:
         # Показываем интерфейс оплаты
         keyboard = [
             [InlineKeyboardButton(f"💳 Оплатить {amount} USDT", url=invoice['pay_url'])],
-            [InlineKeyboardButton("✅ Я оплатил", callback_data=f"notify_{worker_code}")]
+            [InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm_paid_{invoice['invoice_id']}")]
         ]
 
         await query.edit_message_caption(
@@ -705,82 +760,36 @@ async def show_payment(update: Update, product_id: str) -> None:
 
     except Exception as e:
         await query.message.reply_text(f"Ошибка: {str(e)}")
-
-
-# Обработчик вебхука
-@app.post("/cryptobot_webhook")
-async def handle_webhook(request: Request):
-    """Обработчик платежей от Cryptobot"""
-    data = await request.json()
-
-    if data.get('status') == 'paid':
-        try:
-            payload = json.loads(data['payload'])
-            user_id = payload['user_id']
-            product_id = payload['product_id']
-            amount = float(data['amount'])
-            invoice_id = data['invoice_id']
-
-            # Получаем информацию о воркере
-            with sqlite3.connect('workers.db') as conn:
-                cursor = conn.cursor()
-
-                # 1. Находим последнего воркера для этого пользователя
-                cursor.execute('''
-                SELECT w.worker_id, w.worker_code 
-                FROM referrals r
-                JOIN workers w ON r.worker_id = w.worker_id
-                WHERE r.visitor_id = ?
-                ORDER BY r.visit_date DESC LIMIT 1
-                ''', (user_id,))
-
-                worker = cursor.fetchone()
-
-                if worker:
-                    worker_id, worker_code = worker
-
-                    # 2. Сохраняем платеж
-                    cursor.execute('''
-                    INSERT INTO payments (invoice_id, user_id, amount, product_id, status, created_at)
-                    VALUES (?, ?, ?, ?, 'paid', ?)
-                    ''', (invoice_id, user_id, amount, product_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-
-                    # 3. Отправляем уведомление админу
-                    await application.bot.send_message(
-                        chat_id=ADMIN_ID,
-                        text=f"💸 Новый платеж!\n"
-                             f"💰 Сумма: {amount} USDT\n"
-                             f"🛒 Товар: {product_id}\n"
-                             f"👤 Пользователь: {user_id}\n"
-                             f"👷 Воркер: {worker_code}\n\n"
-                             f"Для начисления введите:\n"
-                             f"/pay {worker_code} {amount}"
-                    )
-                else:
-                    # Если нет привязанного воркера
-                    await application.bot.send_message(
-                        chat_id=ADMIN_ID,
-                        text=f"💸 Новый платеж без воркера!\n"
-                             f"💰 Сумма: {amount} USDT\n"
-                             f"🛒 Товар: {product_id}\n"
-                             f"👤 Пользователь: {user_id}"
-                    )
-
-        except Exception as e:
-            logging.error(f"Ошибка обработки вебхука: {str(e)}")
-
-    return {"status": "ok"}
-async def confirm_payment(update: Update, product_id: str) -> None:
+        
+        
+async def handle_payment_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка ручной проверки оплаты"""
     query = update.callback_query
     await query.answer()
-
+    
+    invoice_id = query.data.replace("check_payment_", "")
+    
     try:
-        # Просто сообщаем об успешной оплате
-        await query.message.reply_text(
-            "Обработка платежа"
+        # Проверяем статус платежа
+        response = requests.get(
+            f"{CRYPTOBOT_API}/getInvoices",
+            headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
+            params={"invoice_ids": invoice_id}
         )
-    except Exception:
-        await query.message.reply_text("⚠️ Ошибка уведомления")
+        
+        data = response.json()
+        if data.get('result'):
+            invoice = data['result'][0]
+            if invoice['status'] == 'paid':
+                await query.message.reply_text("✅ Оплата подтверждена! Спасибо за покупку.")
+            else:
+                await query.message.reply_text("⚠️ Платеж еще не поступил. Попробуйте проверить позже.")
+        else:
+            await query.message.reply_text("❌ Не удалось проверить платеж. Попробуйте позже.")
+            
+    except Exception as e:
+        await query.message.reply_text(f"❌ Ошибка при проверке платежа: {str(e)}")
+
 
 async def safe_edit_or_reply(query, text: str):
     """Безопасное редактирование сообщения или отправка нового"""
@@ -856,6 +865,156 @@ async def pay_worker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Неверный формат суммы! Используйте число.")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+        
+async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработка нажатия кнопки 'Я оплатил' с полной проверкой статуса оплаты"""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        invoice_id = query.data.replace("confirm_paid_", "")
+        user_id = query.from_user.id
+        logger.info(f"Пользователь {user_id} подтвердил оплату, invoice_id: {invoice_id}")
+
+        # 1. Проверяем статус платежа в базе данных
+        with sqlite3.connect('workers.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            SELECT status, amount, worker_code, user_id 
+            FROM payments 
+            WHERE invoice_id = ?
+            ''', (invoice_id,))
+            payment = cursor.fetchone()
+            
+            if not payment:
+                logger.error(f"Платеж {invoice_id} не найден в базе")
+                await query.message.reply_text("❌ Платеж не найден в системе")
+                return
+                
+            # 2. Если платеж уже подтвержден
+            if payment['status'] == 'paid':
+                logger.info(f"Платеж {invoice_id} уже подтвержден")
+                await query.message.reply_text("✅ Ваш платеж уже подтвержден! Спасибо.")
+                return
+                
+            # 3. Проверяем статус через API CryptoPay
+            try:
+                response = requests.get(
+                    f"{CRYPTOBOT_API}/getInvoices",
+                    headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
+                    params={"invoice_ids": invoice_id},
+                    timeout=10
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                logger.debug(f"Ответ от CryptoPay: {data}")
+                
+                # Проверяем наличие и корректность данных
+                if not data.get('result') or not isinstance(data['result'], list) or len(data['result']) == 0:
+                    logger.error(f"Неверный или пустой ответ от CryptoPay: {data}")
+                    await query.message.reply_text("⚠️ Вы не оплатили! Оплатите и после чего нажмите снова кнопку - Я оплатил!")
+                    return
+                    
+                invoice = data['result'][0]
+                status = invoice.get('status')
+                
+                logger.info(f"Статус инвойса {invoice_id}: {status}")
+                
+                # 4. Обрабатываем разные статусы
+                if status == 'paid':
+                    # Обновляем статус в базе
+                    cursor.execute('''
+                    UPDATE payments 
+                    SET status = 'paid', 
+                        updated_at = ?
+                    WHERE invoice_id = ?
+                    ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), invoice_id))
+                    
+                    # Находим worker_id для начисления реферального бонуса
+                    cursor.execute('''
+                    SELECT worker_id FROM workers WHERE worker_code = ?
+                    ''', (payment['worker_code'],))
+                    worker = cursor.fetchone()
+                    
+                    if worker:
+                        worker_id = worker['worker_id']
+                        # Фиксируем успешную оплату в рефералах
+                        cursor.execute('''
+                        INSERT INTO referrals 
+                        (worker_id, visitor_id, payment_received, payment_amount, payment_date)
+                        VALUES (?, ?, 1, ?, ?)
+                        ''', (
+                            worker_id,
+                            payment['user_id'],
+                            payment['amount'],
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        ))
+                    
+                    conn.commit()
+                    
+                    # Уведомляем покупателя
+                    await query.message.reply_text(
+                        "✅ Оплата подтверждена! Спасибо за покупку.\n"
+                        "В ближайшее время с вами свяжутся для уточнения деталей доставки."
+                    )
+                    
+                    # Уведомляем админа
+                    await context.bot.send_message(
+                        chat_id=ADMIN_ID,
+                        text=f"💸 Новая оплата!\n"
+                             f"👤 Покупатель: {user_id}\n"
+                             f"💰 Сумма: {payment['amount']} USDT\n"
+                             f"📋 Invoice ID: {invoice_id}"
+                    )
+                    
+                    # Если есть реферал, уведомляем и его
+                    if worker:
+                        try:
+                            await context.bot.send_message(
+                                chat_id=worker_id,
+                                text=f"🎉 Новый реферальный платеж!\n"
+                                     f"💰 Сумма: {payment['amount']} USDT\n"
+                                     f"💳 Invoice ID: {invoice_id}"
+                            )
+                        except Exception as e:
+                            logger.error(f"Не удалось уведомить реферала {worker_id}: {e}")
+                    
+                elif status == 'active':
+                    await query.message.reply_text(
+                        "⚠️ Платеж еще не поступил. Если вы уже оплатили, подождите несколько минут.\n"
+                        "Если платеж не подтвердится в течение 15 минут, обратитесь в поддержку."
+                    )
+                else:
+                    await query.message.reply_text(
+                        f"❌ Платеж не обнаружен. Статус: {status or 'неизвестен'}.\n"
+                        "Если вы уверены, что оплатили, обратитесь в поддержку."
+                    )
+                    
+            except requests.RequestException as e:
+                logger.error(f"Ошибка запроса к CryptoPay: {str(e)}")
+                await query.message.reply_text(
+                    "⚠️ Ошибка соединения с платежной системой. Попробуйте проверить статус позже."
+                )
+                
+    except Exception as e:
+        logger.error(f"Критическая ошибка в handle_payment_confirmation: {str(e)}", exc_info=True)
+        await query.message.reply_text(
+            "⚠️ Произошла непредвиденная ошибка. Администратор уже уведомлен.\n"
+            "Попробуйте проверить статус платежа через 5 минут."
+        )
+        # Уведомляем админа об ошибке
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"🚨 Ошибка при обработке платежа!\n"
+                 f"👤 Пользователь: {user_id}\n"
+                 f"📋 Invoice ID: {invoice_id}\n"
+                 f"💬 Ошибка: {str(e)}\n"
+                 f"🔍 Трассировка: {traceback.format_exc()}"
+        )
+
 # Добавляем тестовую команду
 async def test_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Улучшенная тестовая команда с выбором суммы и автоматическим созданием тестовых данных"""
@@ -952,6 +1111,13 @@ def add_test_referral(worker_id: int, visitor_id: int):
         print(f"Добавлен тестовый переход: worker={worker_id}, visitor={visitor_id}")
     finally:
         conn.close()
+        
+async def confirm_payment(update: Update, product_id: str) -> None:
+    """Подтверждение платежа (заглушка, если где-то остались ссылки на эту функцию)"""
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("Платеж обрабатывается...")    
+    
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Улучшенный обработчик нажатий на кнопки с полным логгированием"""
     query = update.callback_query
@@ -981,10 +1147,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             logging.info(f"Инициирование платежа для товара: {product_id}")
             await show_payment(update, product_id)
 
-        elif data.startswith("paid_"):
-            product_id = data.replace("paid_", "")
-            logging.info(f"Подтверждение платежа для товара: {product_id}")
-            await confirm_payment(update, product_id)
+        elif data.startswith("confirm_paid_"):
+            invoice_id = data.replace("confirm_paid_", "")
+            logging.info(f"Подтверждение оплаты для инвойса: {invoice_id}")
+            await handle_payment_confirmation(update, context)
 
         elif data == "main_menu":
             logging.info("Возврат в главное меню")
@@ -1045,12 +1211,21 @@ async def run_bot():
     application.add_error_handler(error_handler)
     application.add_handler(CommandHandler("testpay", test_payment))
     application.add_handler(CommandHandler("pay", pay_worker))
+    application.add_handler(CallbackQueryHandler(
+        handle_payment_confirmation, 
+        pattern="^confirm_paid_"
+    ))
 
     # Запускаем планировщик
     scheduler.start()
     print("Планировщик запущен")
 
-    # Добавляем недостающие задачи:
+    scheduler.add_job(
+        check_payments,
+        'interval',
+        seconds=30,
+        args=[application]
+    )
 
 
     # 3. Глобальная переменная для доступа к контексту
