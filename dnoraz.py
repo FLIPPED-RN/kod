@@ -727,7 +727,7 @@ PRODUCTS_DATA = {
     "gadgets_4": {
         "name": "Вкус Fuji apple (1500 затяжек)",
         "description": "Все наши одноразки отличаются только вкусом и размером, приходят в плотно закрытых темных пакетах под видом зарядного блока",
-        "price": "1 usdt",
+        "price": "40 usdt",
         "photo": "https://i.postimg.cc/wj3yCwfs/4.jpg",
 
     }
