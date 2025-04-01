@@ -1183,6 +1183,87 @@ async def handle_invalid_input(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
 
+async def pay_worker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка команды выплаты воркеру"""
+    # Проверяем, что команду вызывает админ
+    if str(update.effective_user.id) != ADMIN_ID:
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+
+    try:
+        # Проверяем аргументы команды
+        if len(context.args) != 2:
+            await update.message.reply_text(
+                "❌ Неверный формат команды!\n"
+                "Используйте: /pay <код_воркера> <сумма>"
+            )
+            return
+
+        worker_code = context.args[0]
+        try:
+            amount = float(context.args[1])
+        except ValueError:
+            await update.message.reply_text("❌ Сумма должна быть числом")
+            return
+
+        # Подключаемся к БД
+        with sqlite3.connect('workers.db') as conn:
+            cursor = conn.cursor()
+            
+            # Проверяем существование воркера
+            cursor.execute('''
+            SELECT worker_id, telegram_id 
+            FROM workers 
+            WHERE worker_code = ?
+            ''', (worker_code,))
+            
+            worker = cursor.fetchone()
+            if not worker:
+                await update.message.reply_text(f"❌ Воркер с кодом {worker_code} не найден")
+                return
+
+            worker_id, telegram_id = worker
+
+            # Добавляем запись о выплате
+            payment_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute('''
+            INSERT INTO referrals 
+            (worker_id, visitor_id, payment_received, payment_amount, payment_date, payment_tx)
+            VALUES (?, ?, 1, ?, ?, ?)
+            ''', (
+                worker_id,
+                update.effective_user.id,
+                amount,
+                payment_date,
+                f"manual_pay_{payment_date}"
+            ))
+            
+            conn.commit()
+
+            # Отправляем уведомление воркеру
+            try:
+                await context.bot.send_message(
+                    chat_id=telegram_id,
+                    text=f"💰 Вам начислена выплата!\nСумма: {amount:.2f} USDT"
+                )
+            except Exception as e:
+                print(f"Ошибка при отправке уведомления воркеру: {e}")
+
+            # Отправляем подтверждение админу
+            await update.message.reply_text(
+                f"✅ Выплата успешно начислена!\n"
+                f"👤 Воркер: {worker_code}\n"
+                f"💰 Сумма: {amount:.2f} USDT\n"
+                f"⏰ Время: {payment_date}"
+            )
+
+    except Exception as e:
+        print(f"Ошибка при выполнении команды pay: {e}")
+        await update.message.reply_text(
+            "⚠️ Произошла ошибка при начислении выплаты.\n"
+            "Пожалуйста, проверьте логи и попробуйте снова."
+        )
+
 async def run_bot():
     """Основная функция запуска бота"""
     # Инициализация БД
@@ -1287,84 +1368,3 @@ def main():
 if __name__ == "__main__":
     print("=== Запуск бота ===")
     main()
-
-async def pay_worker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка команды выплаты воркеру"""
-    # Проверяем, что команду вызывает админ
-    if str(update.effective_user.id) != ADMIN_ID:
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-
-    try:
-        # Проверяем аргументы команды
-        if len(context.args) != 2:
-            await update.message.reply_text(
-                "❌ Неверный формат команды!\n"
-                "Используйте: /pay <код_воркера> <сумма>"
-            )
-            return
-
-        worker_code = context.args[0]
-        try:
-            amount = float(context.args[1])
-        except ValueError:
-            await update.message.reply_text("❌ Сумма должна быть числом")
-            return
-
-        # Подключаемся к БД
-        with sqlite3.connect('workers.db') as conn:
-            cursor = conn.cursor()
-            
-            # Проверяем существование воркера
-            cursor.execute('''
-            SELECT worker_id, telegram_id 
-            FROM workers 
-            WHERE worker_code = ?
-            ''', (worker_code,))
-            
-            worker = cursor.fetchone()
-            if not worker:
-                await update.message.reply_text(f"❌ Воркер с кодом {worker_code} не найден")
-                return
-
-            worker_id, telegram_id = worker
-
-            # Добавляем запись о выплате
-            payment_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            cursor.execute('''
-            INSERT INTO referrals 
-            (worker_id, visitor_id, payment_received, payment_amount, payment_date, payment_tx)
-            VALUES (?, ?, 1, ?, ?, ?)
-            ''', (
-                worker_id,
-                update.effective_user.id,
-                amount,
-                payment_date,
-                f"manual_pay_{payment_date}"
-            ))
-            
-            conn.commit()
-
-            # Отправляем уведомление воркеру
-            try:
-                await context.bot.send_message(
-                    chat_id=telegram_id,
-                    text=f"💰 Вам начислена выплата!\nСумма: {amount:.2f} USDT"
-                )
-            except Exception as e:
-                print(f"Ошибка при отправке уведомления воркеру: {e}")
-
-            # Отправляем подтверждение админу
-            await update.message.reply_text(
-                f"✅ Выплата успешно начислена!\n"
-                f"👤 Воркер: {worker_code}\n"
-                f"💰 Сумма: {amount:.2f} USDT\n"
-                f"⏰ Время: {payment_date}"
-            )
-
-    except Exception as e:
-        print(f"Ошибка при выполнении команды pay: {e}")
-        await update.message.reply_text(
-            "⚠️ Произошла ошибка при начислении выплаты.\n"
-            "Пожалуйста, проверьте логи и попробуйте снова."
-        )
