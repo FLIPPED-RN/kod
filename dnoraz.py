@@ -179,7 +179,6 @@ async def check_worker_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
             # Получаем информацию о воркере и общую статистику
             cursor.execute('''
             SELECT w.*, 
-                   COUNT(DISTINCT r.visitor_id) as total_visitors,
                    COUNT(DISTINCT CASE WHEN r.visit_date >= datetime('now', 'start of day', '+3 hours') THEN r.visitor_id END) as visitors_24h,
                    COUNT(CASE WHEN r.payment_received = 1 THEN 1 END) as total_payments,
                    COALESCE(SUM(CASE WHEN r.payment_received = 1 THEN r.payment_amount END), 0) as total_profit,
@@ -206,12 +205,10 @@ async def check_worker_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"➖➖➖➖➖➖➖➖➖\n\n"
                 
                 f"📈 Общая статистика:\n"
-                f"• Всего переходов: {stats['total_visitors']}\n"
                 f"• Всего оплат: {stats['total_payments']}\n"
                 f"• Общий профит: {stats['total_profit']:.2f} USDT\n\n"
                 
                 f"⌛ За сегодня (с 00:00 МСК):\n"
-                f"• Переходов: {stats['visitors_24h']}\n"
                 f"• Оплат: {stats['payments_24h']}\n"
                 f"• Профит: {stats['profit_24h']:.2f} USDT\n\n"
                 
@@ -900,9 +897,9 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # Получаем информацию о платеже
+            # Получаем информацию о платеже и воркере
             cursor.execute('''
-            SELECT p.*, w.worker_code 
+            SELECT p.*, w.worker_code, w.worker_id, w.telegram_id as worker_telegram_id
             FROM payments p
             LEFT JOIN workers w ON p.worker_code = w.worker_code
             WHERE p.invoice_id = ?
@@ -922,48 +919,63 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
                 return
             
             # Проверяем статус через CryptoBot API
-            response = requests.get(
-                f"{CRYPTOBOT_API}/getInvoices",
-                headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
-                params={"invoice_ids": invoice_id}
-            )
-            
-            if not response.ok:
-                raise Exception("Ошибка при проверке платежа в CryptoBot")
-            
-            data = response.json()
-            if data.get('result'):
+            try:
+                response = requests.get(
+                    f"{CRYPTOBOT_API}/getInvoices",
+                    headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
+                    params={"invoice_ids": invoice_id}
+                )
+                
+                if not response.ok:
+                    raise Exception(f"Ошибка API CryptoBot: {response.status_code}")
+                
+                data = response.json()
+                if not data.get('result'):
+                    raise Exception("Нет данных об инвойсе от CryptoBot")
+                
                 invoice = data['result'][0]
                 if invoice['status'] == 'paid':
                     # Обновляем статус платежа
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     cursor.execute('''
                     UPDATE payments 
                     SET status = 'paid', updated_at = ? 
                     WHERE invoice_id = ?
-                    ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), invoice_id))
+                    ''', (current_time, invoice_id))
                     
                     # Получаем информацию о товаре
                     product = PRODUCTS_DATA.get(payment['product_id'], {})
                     product_name = product.get('name', 'Неизвестный товар')
                     
                     # Обновляем статистику воркера
-                    if payment['worker_code'] != "UNKNOWN":
+                    if payment['worker_id']:
                         cursor.execute('''
                         INSERT INTO referrals (
                             worker_id, visitor_id, payment_received, 
-                            payment_amount, payment_date, payment_tx
+                            payment_amount, payment_date, payment_tx,
+                            visit_date
                         )
-                        SELECT 
-                            w.worker_id, ?, 1, ?, ?, ?
-                        FROM workers w 
-                        WHERE w.worker_code = ?
+                        VALUES (?, ?, 1, ?, ?, ?, ?)
                         ''', (
+                            payment['worker_id'],
                             user_id,
                             payment['amount'],
-                            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            current_time,
                             invoice_id,
-                            payment['worker_code']
+                            current_time
                         ))
+                        
+                        # Уведомляем воркера
+                        try:
+                            await context.bot.send_message(
+                                chat_id=payment['worker_telegram_id'],
+                                text=(
+                                    f"💰 Новая оплата по вашей ссылке!\n"
+                                    f"Сумма: {payment['amount']} USDT"
+                                )
+                            )
+                        except Exception as e:
+                            print(f"Ошибка при отправке уведомления воркеру: {e}")
                     
                     # Отправляем уведомление админу
                     admin_message = (
@@ -973,12 +985,16 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
                         f"🏷 Товар: {product_name}\n"
                         f"👨‍💼 Воркер: {payment['worker_code']}\n"
                         f"🆔 ID платежа: {invoice_id}\n"
-                        f"⏰ Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                        f"⏰ Время: {current_time}"
                     )
-                    await context.bot.send_message(
-                        chat_id=ADMIN_ID,
-                        text=admin_message
-                    )
+                    
+                    try:
+                        await context.bot.send_message(
+                            chat_id=ADMIN_ID,
+                            text=admin_message
+                        )
+                    except Exception as e:
+                        print(f"Ошибка при отправке уведомления админу: {e}")
                     
                     conn.commit()
                     
@@ -998,11 +1014,14 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
                         "Проверьте, что вы завершили оплату в CryptoBot",
                         show_alert=True
                     )
-            else:
-                raise Exception("Нет данных об инвойсе от CryptoBot")
+                    
+            except Exception as api_error:
+                print(f"Ошибка при проверке платежа через API: {api_error}")
+                raise
                 
     except Exception as e:
         print(f"Ошибка при подтверждении платежа: {e}")
+        print(f"Полная трассировка: {traceback.format_exc()}")
         await query.message.reply_text(
             "⚠️ Произошла ошибка при проверке платежа.\n"
             "Пожалуйста, попробуйте снова через несколько минут."
