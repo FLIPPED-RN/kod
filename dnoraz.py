@@ -195,33 +195,58 @@ async def check_worker_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def worker_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Упрощенное и надежное меню воркера"""
+    """Меню воркера с функцией регистрации"""
     user = update.effective_user
     user_id = user.id
 
     try:
-        # 1. Подключаемся к базе данных
         conn = sqlite3.connect('workers.db')
-        conn.row_factory = sqlite3.Row  # Для доступа к полям по имени
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # 2. Получаем данные воркера
-        cursor.execute('''
-        SELECT worker_code, register_date 
-        FROM workers 
-        WHERE telegram_id = ?
-        ''', (user_id,))
-
+        # Проверяем, зарегистрирован ли пользователь как воркер
+        cursor.execute('SELECT worker_code, register_date FROM workers WHERE telegram_id = ?', (user_id,))
         worker = cursor.fetchone()
 
         if not worker:
-            await update.message.reply_text(
-                "❌ Вы не зарегистрированы как воркер.\n"
-                "Пожалуйста, начните с команды /start"
-            )
-            return
+            # Если не зарегистрирован, регистрируем
+            worker_code = generate_worker_code()
+            register_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            cursor.execute('''
+            INSERT INTO workers (telegram_id, worker_code, register_date)
+            VALUES (?, ?, ?)
+            ''', (user_id, worker_code, register_date))
+            
+            conn.commit()
 
-        # 3. Получаем статистику
+            # Отправляем приветственное сообщение
+            welcome_message = (
+                f"🎉 Поздравляем! Вы успешно зарегистрированы как воркер!\n\n"
+                f"📌 Ваш код: {worker_code}\n"
+                f"🔗 Ваша реферальная ссылка:\n"
+                f"t.me/{BOT_USERNAME}?start=ref_{worker_code}\n\n"
+                f"ℹ️ Используйте эту ссылку для привлечения клиентов.\n"
+                f"💰 Вы будете получать процент с каждой успешной продажи!"
+            )
+            await update.message.reply_text(welcome_message)
+
+            # Уведомляем админа о новой регистрации
+            admin_message = (
+                f"👤 Новый воркер зарегистрирован!\n"
+                f"ID: {user_id}\n"
+                f"Username: @{user.username or 'нет'}\n"
+                f"Имя: {user.first_name}\n"
+                f"Код: {worker_code}\n"
+                f"Дата: {register_date}"
+            )
+            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_message)
+
+            # Получаем данные только что зарегистрированного воркера
+            cursor.execute('SELECT worker_code, register_date FROM workers WHERE telegram_id = ?', (user_id,))
+            worker = cursor.fetchone()
+
+        # Показываем статистику (как для новых, так и для существующих воркеров)
         cursor.execute('''
         SELECT 
             COUNT(CASE WHEN payment_received = 1 THEN 1 END) as total_payments,
@@ -234,7 +259,6 @@ async def worker_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         stats = cursor.fetchone()
 
-        # 4. Формируем сообщение
         message = (
             f"📊 Статистика воркера #{worker['worker_code']}\n"
             f"➖➖➖➖➖➖➖➖➖\n"
@@ -248,7 +272,6 @@ async def worker_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             f"t.me/{BOT_USERNAME}?start=ref_{worker['worker_code']}"
         )
 
-        # 5. Отправляем сообщение
         await update.message.reply_text(
             text=message,
             parse_mode=None,
@@ -266,7 +289,8 @@ async def worker_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             "⚠️ Произошла ошибка при загрузке данных."
         )
     finally:
-        conn.close() if 'conn' in locals() else None
+        if 'conn' in locals():
+            conn.close()
 
 def generate_worker_code():
     return ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
@@ -494,7 +518,7 @@ PRODUCTS_DATA = {
     "gadgets_4": {
         "name": "Вкус Fuji apple (1500 затяжек)",
         "description": "Все наши одноразки отличаются только вкусом и размером, приходят в плотно закрытых темных пакетах под видом зарядного блока",
-        "price": "40 usdt",
+        "price": "1 usdt",
         "photo": "https://i.postimg.cc/wj3yCwfs/4.jpg",
 
     }
@@ -867,153 +891,81 @@ async def pay_worker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Ошибка: {str(e)}")
         
 async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработка нажатия кнопки 'Я оплатил' с полной проверкой статуса оплаты"""
+    """Обработка подтверждения оплаты с уведомлением админа"""
     query = update.callback_query
     await query.answer()
     
     try:
         invoice_id = query.data.replace("confirm_paid_", "")
         user_id = query.from_user.id
-        logger.info(f"Пользователь {user_id} подтвердил оплату, invoice_id: {invoice_id}")
-
-        # 1. Проверяем статус платежа в базе данных
+        
         with sqlite3.connect('workers.db') as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
+            # Проверяем статус платежа
             cursor.execute('''
-            SELECT status, amount, worker_code, user_id 
-            FROM payments 
-            WHERE invoice_id = ?
+            SELECT p.*, w.worker_code 
+            FROM payments p
+            LEFT JOIN workers w ON p.worker_code = w.worker_code
+            WHERE p.invoice_id = ?
             ''', (invoice_id,))
             payment = cursor.fetchone()
             
             if not payment:
-                logger.error(f"Платеж {invoice_id} не найден в базе")
-                await query.message.reply_text("❌ Платеж не найден в системе")
+                await query.message.reply_text("❌ Платеж не найден")
                 return
                 
-            # 2. Если платеж уже подтвержден
             if payment['status'] == 'paid':
-                logger.info(f"Платеж {invoice_id} уже подтвержден")
-                await query.message.reply_text("✅ Ваш платеж уже подтвержден! Спасибо.")
+                await query.message.reply_text("✅ Этот платеж уже подтвержден")
                 return
-                
-            # 3. Проверяем статус через API CryptoPay
-            try:
-                response = requests.get(
-                    f"{CRYPTOBOT_API}/getInvoices",
-                    headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
-                    params={"invoice_ids": invoice_id},
-                    timeout=10
-                )
-                response.raise_for_status()
+            
+            # Проверяем статус через CryptoPay API
+            response = requests.get(
+                f"{CRYPTOBOT_API}/getInvoices",
+                headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
+                params={"invoice_ids": invoice_id}
+            )
+            
+            if response.status_code == 200:
                 data = response.json()
-                
-                logger.debug(f"Ответ от CryptoPay: {data}")
-                
-                # Проверяем наличие и корректность данных
-                if not data.get('result') or not isinstance(data['result'], list) or len(data['result']) == 0:
-                    logger.error(f"Неверный или пустой ответ от CryptoPay: {data}")
-                    await query.message.reply_text("⚠️ Вы не оплатили! Оплатите и после чего нажмите снова кнопку - Я оплатил!")
-                    return
-                    
-                invoice = data['result'][0]
-                status = invoice.get('status')
-                
-                logger.info(f"Статус инвойса {invoice_id}: {status}")
-                
-                # 4. Обрабатываем разные статусы
-                if status == 'paid':
-                    # Обновляем статус в базе
+                if data.get('result') and data['result'][0]['status'] == 'paid':
+                    # Обновляем статус платежа
                     cursor.execute('''
                     UPDATE payments 
-                    SET status = 'paid', 
-                        updated_at = ?
+                    SET status = 'paid', updated_at = ? 
                     WHERE invoice_id = ?
                     ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), invoice_id))
                     
-                    # Находим worker_id для начисления реферального бонуса
-                    cursor.execute('''
-                    SELECT worker_id FROM workers WHERE worker_code = ?
-                    ''', (payment['worker_code'],))
-                    worker = cursor.fetchone()
-                    
-                    if worker:
-                        worker_id = worker['worker_id']
-                        # Фиксируем успешную оплату в рефералах
-                        cursor.execute('''
-                        INSERT INTO referrals 
-                        (worker_id, visitor_id, payment_received, payment_amount, payment_date)
-                        VALUES (?, ?, 1, ?, ?)
-                        ''', (
-                            worker_id,
-                            payment['user_id'],
-                            payment['amount'],
-                            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        ))
-                    
-                    conn.commit()
-                    
-                    # Уведомляем покупателя
-                    await query.message.reply_text(
-                        "✅ Оплата подтверждена! Спасибо за покупку.\n"
-                        "В ближайшее время с вами свяжутся для уточнения деталей доставки."
+                    # Отправляем уведомление админу
+                    admin_message = (
+                        f"💰 Новая оплата!\n"
+                        f"Сумма: {payment['amount']} USDT\n"
+                        f"От пользователя: {user_id}\n"
+                        f"Воркер: {payment['worker_code']}\n"
+                        f"ID платежа: {invoice_id}"
                     )
-                    
-                    # Уведомляем админа
                     await context.bot.send_message(
                         chat_id=ADMIN_ID,
-                        text=f"💸 Новая оплата!\n"
-                             f"👤 Покупатель: {user_id}\n"
-                             f"💰 Сумма: {payment['amount']} USDT\n"
-                             f"📋 Invoice ID: {invoice_id}"
+                        text=admin_message,
+                        parse_mode='HTML'
                     )
                     
-                    # Если есть реферал, уведомляем и его
-                    if worker:
-                        try:
-                            await context.bot.send_message(
-                                chat_id=worker_id,
-                                text=f"🎉 Новый реферальный платеж!\n"
-                                     f"💰 Сумма: {payment['amount']} USDT\n"
-                                     f"💳 Invoice ID: {invoice_id}"
-                            )
-                        except Exception as e:
-                            logger.error(f"Не удалось уведомить реферала {worker_id}: {e}")
-                    
-                elif status == 'active':
+                    conn.commit()
                     await query.message.reply_text(
-                        "⚠️ Платеж еще не поступил. Если вы уже оплатили, подождите несколько минут.\n"
-                        "Если платеж не подтвердится в течение 15 минут, обратитесь в поддержку."
+                        "✅ Оплата подтверждена! Спасибо за покупку.\n"
+                        "Мы свяжемся с вами для уточнения деталей доставки."
                     )
                 else:
                     await query.message.reply_text(
-                        f"❌ Платеж не обнаружен. Статус: {status or 'неизвестен'}.\n"
-                        "Если вы уверены, что оплатили, обратитесь в поддержку."
+                        "⚠️ Оплата еще не поступила. Пожалуйста, подождите или проверьте статус позже."
                     )
-                    
-            except requests.RequestException as e:
-                logger.error(f"Ошибка запроса к CryptoPay: {str(e)}")
-                await query.message.reply_text(
-                    "⚠️ Ошибка соединения с платежной системой. Попробуйте проверить статус позже."
-                )
+            else:
+                await query.message.reply_text("❌ Ошибка при проверке платежа")
                 
     except Exception as e:
-        logger.error(f"Критическая ошибка в handle_payment_confirmation: {str(e)}", exc_info=True)
-        await query.message.reply_text(
-            "⚠️ Произошла непредвиденная ошибка. Администратор уже уведомлен.\n"
-            "Попробуйте проверить статус платежа через 5 минут."
-        )
-        # Уведомляем админа об ошибке
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"🚨 Ошибка при обработке платежа!\n"
-                 f"👤 Пользователь: {user_id}\n"
-                 f"📋 Invoice ID: {invoice_id}\n"
-                 f"💬 Ошибка: {str(e)}\n"
-                 f"🔍 Трассировка: {traceback.format_exc()}"
-        )
+        print(f"Ошибка при подтверждении платежа: {e}")
+        await query.message.reply_text("⚠️ Произошла ошибка при проверке платежа")
 
 # Добавляем тестовую команду
 async def test_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1208,7 +1160,6 @@ async def run_bot():
     application.add_handler(CallbackQueryHandler(button_click))
     application.add_handler(CommandHandler("OdnorazGashWorker", worker_menu))
     application.add_handler(CommandHandler("TuQwPPPvZL23", check_worker_stats))
-    application.add_error_handler(error_handler)
     application.add_handler(CommandHandler("testpay", test_payment))
     application.add_handler(CommandHandler("pay", pay_worker))
     application.add_handler(CallbackQueryHandler(

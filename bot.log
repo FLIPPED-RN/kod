@@ -1,0 +1,163 @@
+2025-04-01 12:27:44,217 - __main__ - INFO - === Запуск бота ===
+2025-04-01 12:27:45,331 - apscheduler.scheduler - INFO - Scheduler started
+2025-04-01 12:27:45,339 - apscheduler.scheduler - INFO - Added job "check_payments" to job store "default"
+2025-04-01 12:27:45,546 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getMe "HTTP/1.1 200 OK"
+2025-04-01 12:27:45,547 - telegram.ext.Application - INFO - Application started
+2025-04-01 12:27:45,583 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/deleteWebhook "HTTP/1.1 200 OK"
+2025-04-01 12:27:49,810 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 409 Conflict"
+2025-04-01 12:27:49,811 - telegram.ext.Updater - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "C:\Users\Ruslan\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\telegram\ext\_updater.py", line 750, in _network_loop_retry
+    if not await do_action():
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ruslan\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\telegram\ext\_updater.py", line 744, in do_action
+    return action_cb_task.result()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ruslan\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\telegram\ext\_updater.py", line 371, in polling_action_cb
+    updates = await self.bot.get_updates(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ruslan\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\telegram\ext\_extbot.py", line 650, in get_updates
+    updates = await super().get_updates(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ruslan\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\telegram\_bot.py", line 4480, in get_updates
+    await self._post(
+  File "C:\Users\Ruslan\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\telegram\_bot.py", line 619, in _post
+    return await self._do_post(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ruslan\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\telegram\ext\_extbot.py", line 354, in _do_post
+    return await super()._do_post(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ruslan\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\telegram\_bot.py", line 648, in _do_post
+    result = await request.post(
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ruslan\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\telegram\request\_baserequest.py", line 202, in post
+    result = await self._request_wrapper(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ruslan\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\telegram\request\_baserequest.py", line 385, in _request_wrapper
+    raise Conflict(message)
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2025-04-01 12:29:17,007 - __main__ - INFO - === Запуск бота ===
+2025-04-01 12:29:17,845 - apscheduler.scheduler - INFO - Scheduler started
+2025-04-01 12:29:17,846 - apscheduler.scheduler - INFO - Added job "check_payments" to job store "default"
+2025-04-01 12:29:17,993 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getMe "HTTP/1.1 200 OK"
+2025-04-01 12:29:17,993 - telegram.ext.Application - INFO - Application started
+2025-04-01 12:29:18,050 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/deleteWebhook "HTTP/1.1 200 OK"
+2025-04-01 12:29:28,177 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:29,053 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:29,853 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:29:32,318 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:32,403 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:29:32,494 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:29:36,204 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:36,266 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:36,266 - root - INFO - User 1619191387 нажал кнопку: change_data
+2025-04-01 12:29:36,267 - root - INFO - Запрос на изменение данных
+2025-04-01 12:29:36,345 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:29:38,910 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:38,995 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:29:39,085 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:29:41,408 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:41,472 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:41,473 - root - INFO - User 1619191387 нажал кнопку: category_game
+2025-04-01 12:29:41,473 - root - INFO - Открытие категории: game
+2025-04-01 12:29:41,538 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:41,614 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/editMessageText "HTTP/1.1 200 OK"
+2025-04-01 12:29:45,877 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:45,939 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:45,939 - root - INFO - User 1619191387 нажал кнопку: product_game_2
+2025-04-01 12:29:45,939 - root - INFO - Просмотр товара: game_2
+2025-04-01 12:29:46,013 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:46,099 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendPhoto "HTTP/1.1 200 OK"
+2025-04-01 12:29:47,853 - apscheduler.executors.default - INFO - Running job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:30:17 EET)" (scheduled at 2025-04-01 12:29:47.846557+02:00)
+2025-04-01 12:29:47,854 - apscheduler.executors.default - INFO - Job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:30:17 EET)" executed successfully
+2025-04-01 12:29:48,434 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:48,505 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:48,505 - root - INFO - User 1619191387 нажал кнопку: category_game
+2025-04-01 12:29:48,505 - root - INFO - Открытие категории: game
+2025-04-01 12:29:48,566 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:48,625 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/editMessageText "HTTP/1.1 400 Bad Request"
+2025-04-01 12:29:48,730 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:29:50,938 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:51,001 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:51,002 - root - INFO - User 1619191387 нажал кнопку: main_menu
+2025-04-01 12:29:51,002 - root - INFO - Возврат в главное меню
+2025-04-01 12:29:51,080 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:29:51,850 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:51,912 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:51,912 - root - INFO - User 1619191387 нажал кнопку: category_gadgets
+2025-04-01 12:29:51,913 - root - INFO - Открытие категории: gadgets
+2025-04-01 12:29:51,972 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:52,046 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/editMessageText "HTTP/1.1 200 OK"
+2025-04-01 12:29:54,435 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:54,498 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:54,499 - root - INFO - User 1619191387 нажал кнопку: product_gadgets_4
+2025-04-01 12:29:54,499 - root - INFO - Просмотр товара: gadgets_4
+2025-04-01 12:29:54,567 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:54,652 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendPhoto "HTTP/1.1 200 OK"
+2025-04-01 12:29:55,933 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:29:55,997 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:55,997 - root - INFO - User 1619191387 нажал кнопку: payment_gadgets_4
+2025-04-01 12:29:55,997 - root - INFO - Инициирование платежа для товара: gadgets_4
+2025-04-01 12:29:56,066 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:29:56,788 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/editMessageCaption "HTTP/1.1 200 OK"
+2025-04-01 12:30:02,591 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:30:02,716 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:30:02,717 - root - INFO - User 1619191387 нажал кнопку: confirm_paid_23273373
+2025-04-01 12:30:02,717 - root - INFO - Подтверждение оплаты для инвойса: 23273373
+2025-04-01 12:30:02,763 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/answerCallbackQuery "HTTP/1.1 200 OK"
+2025-04-01 12:30:03,130 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:30:12,633 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:30:17,853 - apscheduler.executors.default - INFO - Running job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:30:47 EET)" (scheduled at 2025-04-01 12:30:17.846557+02:00)
+2025-04-01 12:30:18,062 - apscheduler.executors.default - INFO - Job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:30:47 EET)" executed successfully
+2025-04-01 12:30:22,676 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:30:32,732 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:30:37,408 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:30:37,564 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:30:47,452 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:30:47,850 - apscheduler.executors.default - INFO - Running job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:31:17 EET)" (scheduled at 2025-04-01 12:30:47.846557+02:00)
+2025-04-01 12:30:48,263 - apscheduler.executors.default - INFO - Job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:31:17 EET)" executed successfully
+2025-04-01 12:30:57,747 - __main__ - INFO - === Запуск бота ===
+2025-04-01 12:30:58,595 - apscheduler.scheduler - INFO - Scheduler started
+2025-04-01 12:30:58,596 - apscheduler.scheduler - INFO - Added job "check_payments" to job store "default"
+2025-04-01 12:30:58,720 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getMe "HTTP/1.1 200 OK"
+2025-04-01 12:30:58,720 - telegram.ext.Application - INFO - Application started
+2025-04-01 12:30:58,759 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/deleteWebhook "HTTP/1.1 200 OK"
+2025-04-01 12:31:00,837 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:31:00,904 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:31:10,894 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:31:20,945 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:31:28,601 - apscheduler.executors.default - INFO - Running job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:31:58 EET)" (scheduled at 2025-04-01 12:31:28.595294+02:00)
+2025-04-01 12:31:28,602 - apscheduler.executors.default - INFO - Job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:31:58 EET)" executed successfully
+2025-04-01 12:31:30,999 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:31:41,049 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:32:14,297 - __main__ - INFO - === Запуск бота ===
+2025-04-01 12:32:15,157 - apscheduler.scheduler - INFO - Scheduler started
+2025-04-01 12:32:15,157 - apscheduler.scheduler - INFO - Added job "check_payments" to job store "default"
+2025-04-01 12:32:15,281 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getMe "HTTP/1.1 200 OK"
+2025-04-01 12:32:15,282 - telegram.ext.Application - INFO - Application started
+2025-04-01 12:32:15,320 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/deleteWebhook "HTTP/1.1 200 OK"
+2025-04-01 12:32:16,872 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:32:16,969 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:32:17,026 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 400 Bad Request"
+2025-04-01 12:32:17,091 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:32:25,671 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:32:26,352 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/sendMessage "HTTP/1.1 200 OK"
+2025-04-01 12:32:35,714 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:32:45,161 - apscheduler.executors.default - INFO - Running job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:33:15 EET)" (scheduled at 2025-04-01 12:32:45.157605+02:00)
+2025-04-01 12:32:45,162 - apscheduler.executors.default - INFO - Job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:33:15 EET)" executed successfully
+2025-04-01 12:32:45,756 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:32:55,800 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:33:05,841 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:33:15,163 - apscheduler.executors.default - INFO - Running job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:33:45 EET)" (scheduled at 2025-04-01 12:33:15.157605+02:00)
+2025-04-01 12:33:15,164 - apscheduler.executors.default - INFO - Job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:33:45 EET)" executed successfully
+2025-04-01 12:33:15,881 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:33:25,921 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:33:35,963 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:33:45,164 - apscheduler.executors.default - INFO - Running job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:34:15 EET)" (scheduled at 2025-04-01 12:33:45.157605+02:00)
+2025-04-01 12:33:45,165 - apscheduler.executors.default - INFO - Job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:34:15 EET)" executed successfully
+2025-04-01 12:33:46,007 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:33:56,049 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:34:06,088 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
+2025-04-01 12:34:15,164 - apscheduler.executors.default - INFO - Running job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:34:45 EET)" (scheduled at 2025-04-01 12:34:15.157605+02:00)
+2025-04-01 12:34:15,165 - apscheduler.executors.default - INFO - Job "check_payments (trigger: interval[0:00:30], next run at: 2025-04-01 12:34:45 EET)" executed successfully
+2025-04-01 12:34:16,133 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE/getUpdates "HTTP/1.1 200 OK"
