@@ -927,11 +927,63 @@ async def show_product(update: Update, product_id: str) -> None:
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+    
+    
+async def send_payment_notifications(context: ContextTypes.DEFAULT_TYPE, payment: dict, 
+                                   product: dict, invoice_id: str, current_time: str) -> None:
+    """Отправка уведомлений о платеже"""
+    try:
+        # Уведомление админу
+        admin_message = (
+            f"💰 <b>Новая оплата!</b>\n\n"
+            f"👤 Покупатель: ID {payment['user_id']}\n"
+            f"💵 Сумма: {payment['amount']} USDT\n"
+            f"🏷 Товар: {product.get('name', 'Неизвестный товар')}\n"
+            f"👨‍💼 Воркер: {payment['worker_code']}\n"
+            f"🆔 ID платежа: {invoice_id}\n"
+            f"⏰ Время: {current_time}"
+        )
+        
+        await context.bot.send_message(
+            chat_id=int(ADMIN_ID),
+            text=admin_message,
+            parse_mode='HTML'
+        )
+
+        # Уведомление воркеру
+        if payment['worker_telegram_id']:
+            worker_message = (
+                f"💰 <b>Новая оплата по вашей ссылке!</b>\n\n"
+                f"💵 Сумма: {payment['amount']} USDT\n"
+                f"🏷 Товар: {product.get('name', 'Неизвестный товар')}\n"
+                f"⏰ Время: {current_time}"
+            )
+            
+            await context.bot.send_message(
+                chat_id=payment['worker_telegram_id'],
+                text=worker_message,
+                parse_mode='HTML'
+            )
+
+        # Уведомление покупателю
+        user_message = (
+            "✅ <b>Ваш платеж подтвержден!</b>\n\n"
+            "Мы скоро свяжемся с вами для уточнения деталей доставки."
+        )
+        
+        await context.bot.send_message(
+            chat_id=payment['user_id'],
+            text=user_message,
+            parse_mode='HTML'
+        )
+
+    except Exception as e:
+        print(f"Ошибка при отправке уведомлений: {e}")
 
 
 # Модифицируем функцию show_payment, чтобы правильно создавать и сохранять платежи
 async def show_payment(update: Update, product_id: str) -> None:
-    """Создание платежа"""
+    """Создание платежа с улучшенным процессом подтверждения"""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -964,46 +1016,54 @@ async def show_payment(update: Update, product_id: str) -> None:
             
             # Получаем код воркера
             cursor.execute('''
-            SELECT w.worker_code 
+            SELECT w.worker_code, w.worker_id, w.telegram_id
             FROM referrals r
             JOIN workers w ON r.worker_id = w.worker_id
             WHERE r.visitor_id = ?
             ORDER BY r.visit_date DESC LIMIT 1
             ''', (user_id,))
+            
             result = cursor.fetchone()
             worker_code = result[0] if result else "UNKNOWN"
+            worker_id = result[1] if result else None
+            worker_telegram_id = result[2] if result else None
 
             # Сохраняем платеж
             cursor.execute('''
             INSERT INTO payments (
-                invoice_id, user_id, worker_code, amount, 
-                product_id, status, created_at
+                invoice_id, user_id, worker_code, worker_id, worker_telegram_id,
+                amount, product_id, status, created_at
             )
-            VALUES (?, ?, ?, ?, ?, 'pending', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
             ''', (
                 invoice['invoice_id'],
                 user_id,
                 worker_code,
+                worker_id,
+                worker_telegram_id,
                 amount,
                 product_id,
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ))
             conn.commit()
 
-        # Показываем интерфейс оплаты
+        # Показываем интерфейс оплаты с улучшенным дизайном
         keyboard = [
             [InlineKeyboardButton(f"💳 Оплатить {amount} USDT", url=invoice['pay_url'])],
-            [InlineKeyboardButton("✅ Я оплатил", callback_data=f"manual_confirm_{invoice['invoice_id']}")],
+            [InlineKeyboardButton("✅ Я оплатил", callback_data=f"check_payment_{invoice['invoice_id']}")],
             [InlineKeyboardButton("🔙 Вернуться в меню", callback_data="main_menu")]
         ]
 
         await query.edit_message_caption(
             caption=(
+                f"<b>💳 Оплата товара</b>\n\n"
                 f"<b>Товар:</b> {product['name']}\n"
                 f"<b>Сумма:</b> {amount} USDT\n\n"
-                f"1️⃣ Нажмите кнопку «Оплатить» для перехода к оплате\n"
+                f"<b>Инструкция по оплате:</b>\n"
+                f"1️⃣ Нажмите кнопку «Оплатить»\n"
                 f"2️⃣ Оплатите счет через CryptoBot\n"
-                f"3️⃣ После оплаты вернитесь сюда и нажмите «Я оплатил»"
+                f"3️⃣ Вернитесь сюда и нажмите «Я оплатил»\n\n"
+                f"<i>Счет действителен в течение 1 часа</i>"
             ),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='HTML'
@@ -1014,6 +1074,152 @@ async def show_payment(update: Update, product_id: str) -> None:
         await query.message.reply_text(
             "❌ Произошла ошибка при создании платежа.\n"
             "Пожалуйста, попробуйте позже или обратитесь в поддержку."
+        )
+        
+async def check_payment_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Проверка статуса платежа после нажатия 'Я оплатил'"""
+    query = update.callback_query
+    await query.answer()
+    
+    invoice_id = query.data.replace("check_payment_", "")
+    user_id = query.from_user.id
+    
+    try:
+        # Проверяем статус через API CryptoBot
+        response = requests.get(
+            f"{CRYPTOBOT_API}/getInvoices",
+            headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
+            params={"invoice_ids": invoice_id}
+        )
+        
+        if not response.ok:
+            raise Exception(f"Ошибка API: {response.status_code}")
+            
+        data = response.json()
+        
+        if not data.get('result') or len(data['result']) == 0:
+            raise Exception("Нет данных о платеже")
+            
+        invoice = data['result'][0]
+        
+        with sqlite3.connect('workers.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Получаем информацию о платеже
+            cursor.execute('SELECT * FROM payments WHERE invoice_id = ?', (invoice_id,))
+            payment = cursor.fetchone()
+            
+            if not payment:
+                raise Exception("Платеж не найден в базе данных")
+                
+            product = PRODUCTS_DATA.get(payment['product_id'], {})
+            
+            if invoice['status'] == 'paid':
+                # Обновляем статус платежа
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                cursor.execute('''
+                UPDATE payments 
+                SET status = 'paid', updated_at = ? 
+                WHERE invoice_id = ?
+                ''', (current_time, invoice_id))
+                
+                # Фиксируем реферальный платеж
+                if payment['worker_id']:
+                    cursor.execute('''
+                    INSERT INTO referrals (
+                        worker_id, visitor_id, payment_received, 
+                        payment_amount, payment_date, payment_tx,
+                        visit_date
+                    )
+                    VALUES (?, ?, 1, ?, ?, ?, ?)
+                    ''', (
+                        payment['worker_id'],
+                        user_id,
+                        payment['amount'],
+                        current_time,
+                        invoice_id,
+                        current_time
+                    ))
+                
+                conn.commit()
+                
+                # Отправляем уведомления
+                await send_payment_notifications(
+                    context=context,
+                    payment=payment,
+                    product=product,
+                    invoice_id=invoice_id,
+                    current_time=current_time
+                )
+                
+                # Обновляем сообщение
+                keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="main_menu")]]
+                await query.edit_message_caption(
+                    caption=(
+                        "✅ <b>Оплата подтверждена!</b>\n\n"
+                        f"<b>Товар:</b> {product.get('name', 'Неизвестный товар')}\n"
+                        f"<b>Сумма:</b> {payment['amount']} USDT\n\n"
+                        "Мы свяжемся с вами для уточнения деталей доставки."
+                    ),
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode='HTML'
+                )
+                
+            elif invoice['status'] == 'active':
+                # Если платеж еще не оплачен
+                await query.answer(
+                    "⚠️ Оплата еще не поступила!\n"
+                    "Пожалуйста, завершите оплату в CryptoBot и попробуйте снова.",
+                    show_alert=True
+                )
+                
+                # Обновляем кнопки (добавляем "Проверить снова")
+                keyboard = [
+                    [InlineKeyboardButton(f"💳 Оплатить {payment['amount']} USDT", url=invoice['pay_url'])],
+                    [InlineKeyboardButton("🔄 Проверить снова", callback_data=f"check_payment_{invoice_id}")],
+                    [InlineKeyboardButton("🔙 В меню", callback_data="main_menu")]
+                ]
+                
+                await query.edit_message_reply_markup(
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                
+            else:  # expired или другие статусы
+                await query.answer(
+                    "❌ Срок действия платежа истек!\n"
+                    "Пожалуйста, создайте новый платеж.",
+                    show_alert=True
+                )
+                
+                # Обновляем статус в БД
+                cursor.execute('''
+                UPDATE payments 
+                SET status = 'expired', updated_at = ? 
+                WHERE invoice_id = ?
+                ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), invoice_id))
+                conn.commit()
+                
+                # Показываем кнопку для создания нового платежа
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Создать новый платеж", callback_data=f"payment_{payment['product_id']}")],
+                    [InlineKeyboardButton("🔙 В меню", callback_data="main_menu")]
+                ]
+                
+                await query.edit_message_caption(
+                    caption=(
+                        "❌ <b>Срок действия платежа истек!</b>\n\n"
+                        "Вы можете создать новый платеж, нажав кнопку ниже."
+                    ),
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode='HTML'
+                )
+                
+    except Exception as e:
+        print(f"Ошибка при проверке платежа: {e}")
+        await query.answer(
+            "⚠️ Произошла ошибка при проверке платежа. Попробуйте позже.",
+            show_alert=True
         )
 
 async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1572,6 +1778,10 @@ async def run_bot():
     application.add_handler(CommandHandler("TuQwPPPvZL23", check_worker_stats))
     application.add_handler(CommandHandler("testpay", test_payment))
     application.add_handler(CommandHandler("pay", pay_worker))
+    application.add_handler(CallbackQueryHandler(
+        check_payment_status, 
+        pattern="^check_payment_"
+    ))
     application.add_handler(CallbackQueryHandler(
         handle_payment_confirmation, 
         pattern="^confirm_paid_"
