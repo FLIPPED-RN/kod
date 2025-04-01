@@ -379,6 +379,7 @@ def generate_ref_link(worker_code):
 
 async def check_payments(context: ContextTypes.DEFAULT_TYPE):
     """Периодическая проверка неоплаченных платежей"""
+    print("🔄 Начало проверки платежей...")
     try:
         conn = sqlite3.connect('workers.db')
         conn.row_factory = sqlite3.Row
@@ -386,14 +387,17 @@ async def check_payments(context: ContextTypes.DEFAULT_TYPE):
         
         # Получаем все pending платежи
         cursor.execute('''
-        SELECT p.*, w.worker_id, w.telegram_id as worker_telegram_id
+        SELECT p.*, w.worker_code, w.worker_id, w.telegram_id as worker_telegram_id
         FROM payments p
         LEFT JOIN workers w ON p.worker_code = w.worker_code
         WHERE p.status = 'pending'
         ''')
         pending_payments = cursor.fetchall()
         
+        print(f"📝 Найдено {len(pending_payments)} неподтвержденных платежей")
+        
         for payment in pending_payments:
+            print(f"🔍 Проверка платежа {payment['invoice_id']}")
             # Проверяем статус через API
             response = requests.get(
                 f"{CRYPTOBOT_API}/getInvoices",
@@ -401,28 +405,39 @@ async def check_payments(context: ContextTypes.DEFAULT_TYPE):
                 params={"invoice_ids": payment['invoice_id']}
             )
             
+            print(f"📡 Ответ API: {response.status_code}")
+            print(f"📄 Содержимое ответа: {response.text}")
+            
             if not response.ok:
+                print(f"❌ Ошибка API: {response.status_code}")
                 continue
                 
             data = response.json()
-            if data.get('result'):
-                invoice = data['result'][0]
-                if invoice['status'] == 'paid':
-                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    # Обновляем статус платежа
-                    cursor.execute('''
-                    UPDATE payments 
-                    SET status = 'paid', updated_at = ? 
-                    WHERE invoice_id = ?
-                    ''', (current_time, payment['invoice_id']))
+            if not data.get('result'):
+                print("❌ Нет данных в ответе API")
+                continue
 
-                    # Получаем информацию о товаре
-                    product = PRODUCTS_DATA.get(payment['product_id'], {})
-                    product_name = product.get('name', 'Неизвестный товар')
+            invoice = data['result'][0]
+            print(f"💳 Статус платежа: {invoice['status']}")
+            
+            if invoice['status'] == 'paid':
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                print(f"✅ Платеж {payment['invoice_id']} подтвержден!")
+                
+                # Обновляем статус платежа
+                cursor.execute('''
+                UPDATE payments 
+                SET status = 'paid', updated_at = ? 
+                WHERE invoice_id = ?
+                ''', (current_time, payment['invoice_id']))
 
-                    # Обновляем статистику воркера
-                    if payment['worker_id']:
+                # Получаем информацию о товаре
+                product = PRODUCTS_DATA.get(payment['product_id'], {})
+                product_name = product.get('name', 'Неизвестный товар')
+
+                # Обновляем статистику воркера
+                if payment['worker_id']:
+                    try:
                         cursor.execute('''
                         INSERT INTO referrals (
                             worker_id, visitor_id, payment_received, 
@@ -438,56 +453,61 @@ async def check_payments(context: ContextTypes.DEFAULT_TYPE):
                             payment['invoice_id'],
                             current_time
                         ))
+                        print(f"✅ Статистика воркера обновлена")
+                    except Exception as e:
+                        print(f"❌ Ошибка при обновлении статистики воркера: {e}")
 
-                        # Уведомляем воркера
-                        try:
-                            await context.bot.send_message(
-                                chat_id=payment['worker_telegram_id'],
-                                text=(
-                                    f"💰 Новая оплата по вашей ссылке!\n"
-                                    f"Сумма: {payment['amount']} USDT"
-                                )
+                try:
+                    # Уведомляем воркера
+                    if payment['worker_telegram_id']:
+                        await context.bot.send_message(
+                            chat_id=payment['worker_telegram_id'],
+                            text=(
+                                f"💰 Новая оплата по вашей ссылке!\n"
+                                f"Сумма: {payment['amount']} USDT"
                             )
-                        except Exception as e:
-                            print(f"Ошибка при отправке уведомления воркеру: {e}")
+                        )
+                        print(f"✅ Уведомление отправлено воркеру {payment['worker_telegram_id']}")
 
                     # Уведомляем покупателя
-                    try:
-                        await context.bot.send_message(
-                            chat_id=payment['user_id'],
-                            text=(
-                                "✅ Ваш платеж успешно получен!\n"
-                                "Мы скоро свяжемся с вами для уточнения деталей доставки."
-                            )
+                    await context.bot.send_message(
+                        chat_id=payment['user_id'],
+                        text=(
+                            "✅ Ваш платеж успешно получен!\n"
+                            "Мы скоро свяжемся с вами для уточнения деталей доставки."
                         )
-                    except Exception as e:
-                        print(f"Ошибка при отправке уведомления покупателю: {e}")
+                    )
+                    print(f"✅ Уведомление отправлено покупателю {payment['user_id']}")
 
                     # Уведомляем админа
-                    try:
-                        admin_message = (
-                            f"💰 Новая оплата!\n"
-                            f"👤 Покупатель: ID: {payment['user_id']}\n"
-                            f"💵 Сумма: {payment['amount']} USDT\n"
-                            f"🏷 Товар: {product_name}\n"
-                            f"👨‍💼 Воркер: {payment['worker_code']}\n"
-                            f"🆔 ID платежа: {payment['invoice_id']}\n"
-                            f"⏰ Время: {current_time}"
-                        )
-                        await context.bot.send_message(
-                            chat_id=ADMIN_ID,
-                            text=admin_message
-                        )
-                    except Exception as e:
-                        print(f"Ошибка при отправке уведомления админу: {e}")
+                    admin_message = (
+                        f"💰 Новая оплата!\n"
+                        f"👤 Покупатель: ID: {payment['user_id']}\n"
+                        f"💵 Сумма: {payment['amount']} USDT\n"
+                        f"🏷 Товар: {product_name}\n"
+                        f"👨‍💼 Воркер: {payment['worker_code']}\n"
+                        f"🆔 ID платежа: {payment['invoice_id']}\n"
+                        f"⏰ Время: {current_time}"
+                    )
+                    await context.bot.send_message(
+                        chat_id=ADMIN_ID,
+                        text=admin_message
+                    )
+                    print(f"✅ Уведомление отправлено админу")
 
-                    conn.commit()
+                except Exception as e:
+                    print(f"❌ Ошибка при отправке уведомлений: {e}")
+
+                conn.commit()
+                print(f"✅ Транзакция завершена успешно")
                     
     except Exception as e:
-        print(f"Ошибка при проверке платежей: {e}")
+        print(f"❌ Ошибка при проверке платежей: {e}")
+        print(f"Полная трассировка: {traceback.format_exc()}")
     finally:
         if conn:
             conn.close()
+        print("🔄 Завершение проверки платежей")
 
 
 
@@ -1103,63 +1123,64 @@ async def test_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Неверный формат суммы. Используйте: /testpay [amount] [worker_code]")
             return
 
-    conn = None
-    try:
-        conn = sqlite3.connect('workers.db')
-        cursor = conn.cursor()
+        conn = None
+        try:
+            conn = sqlite3.connect('workers.db')
+            cursor = conn.cursor()
 
-        # Получаем worker_id по коду
-        cursor.execute('SELECT telegram_id FROM workers WHERE worker_code = ?', (worker_code,))
-        worker_data = cursor.fetchone()
+            # Получаем worker_id по коду
+            cursor.execute('SELECT telegram_id FROM workers WHERE worker_code = ?', (worker_code,))
+            worker_data = cursor.fetchone()
 
-        if not worker_data:
-            await update.message.reply_text(f"❌ Воркер с кодом {worker_code} не найден!")
-            return
+            if not worker_data:
+                await update.message.reply_text(f"❌ Воркер с кодом {worker_code} не найден!")
+                return
 
-        worker_id = worker_data[0]
+            worker_id = worker_data[0]
 
-        # Создаем тестового посетителя
-        test_visitor_id = int(datetime.now().timestamp() % 1000000)  # Уникальный ID на основе времени
+            # Создаем тестового посетителя
+            test_visitor_id = int(datetime.now().timestamp() % 1000000)  # Уникальный ID на основе времени
 
-        # Добавляем тестовый переход
-        cursor.execute('''
-        INSERT INTO referrals 
-        (worker_id, visitor_id, visit_date, payment_received, payment_amount, payment_date)
-        VALUES (?, ?, ?, 1, ?, ?)
-        ''', (
-            worker_id,
-            test_visitor_id,
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            amount,
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        ))
-        conn.commit()
+            # Добавляем тестовый переход
+            cursor.execute('''
+            INSERT INTO referrals 
+            (worker_id, visitor_id, visit_date, payment_received, payment_amount, payment_date)
+            VALUES (?, ?, ?, 1, ?, ?)
+            ''', (
+                worker_id,
+                test_visitor_id,
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                amount,
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ))
+            conn.commit()
 
-        # Получаем обновленную статистику
-        stats_24h = get_worker_stats(worker_id, last_24h=True)
-        stats_total = get_worker_stats(worker_id)
+            # Получаем обновленную статистику
+            stats_24h = get_worker_stats(worker_id, last_24h=True)
+            stats_total = get_worker_stats(worker_id)
 
-        await update.message.reply_text(
-            f"🟢 Тестовая оплата зачислена!\n"
-            f"💼 Воркер: {worker_code} (ID: {worker_id})\n"
-            f"👤 Посетитель: {test_visitor_id}\n"
-            f"💰 Сумма: {amount:.2f} USDT\n\n"
-            f"📊 Статистика за 24ч:\n"
-            f"👥 Переходы: {stats_24h['visits']}\n"
-            f"💳 Оплаты: {stats_24h['payments']}\n"
-            f"💵 Профит: {stats_24h['profit']:.2f} USDT\n\n"
-            f"📈 Всего:\n"
-            f"👥 Переходы: {stats_total['visits']}\n"
-            f"💳 Оплаты: {stats_total['payments']}\n"
-            f"💵 Профит: {stats_total['profit']:.2f} USDT",
-            parse_mode='HTML'
-        )
+            await update.message.reply_text(
+                f"�� Тестовая оплата зачислена!\n"
+                f"💼 Воркер: {worker_code} (ID: {worker_id})\n"
+                f"👤 Посетитель: {test_visitor_id}\n"
+                f"💰 Сумма: {amount:.2f} USDT\n\n"
+                f"📊 Статистика за 24ч:\n"
+                f"👥 Переходы: {stats_24h['visits']}\n"
+                f"💳 Оплаты: {stats_24h['payments']}\n"
+                f"💵 Профит: {stats_24h['profit']:.2f} USDT\n\n"
+                f"📈 Всего:\n"
+                f"👥 Переходы: {stats_total['visits']}\n"
+                f"💳 Оплаты: {stats_total['payments']}\n"
+                f"💵 Профит: {stats_total['profit']:.2f} USDT",
+                parse_mode='HTML'
+            )
 
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {str(e)}\n\nТрассировка:\n{traceback.format_exc()}")
-    finally:
-        if conn:
-            conn.close()
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {str(e)}\n\nТрассировка:\n{traceback.format_exc()}")
+        finally:
+            if conn:
+                conn.close()
+
 def add_test_referral(worker_id: int, visitor_id: int):
     """Добавление тестового перехода"""
     conn = sqlite3.connect('workers.db')
