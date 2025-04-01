@@ -381,58 +381,113 @@ async def check_payments(context: ContextTypes.DEFAULT_TYPE):
     """Периодическая проверка неоплаченных платежей"""
     try:
         conn = sqlite3.connect('workers.db')
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         # Получаем все pending платежи
         cursor.execute('''
-        SELECT invoice_id, user_id, worker_code, amount, product_id 
-        FROM payments 
-        WHERE status = 'pending'
+        SELECT p.*, w.worker_id, w.telegram_id as worker_telegram_id
+        FROM payments p
+        LEFT JOIN workers w ON p.worker_code = w.worker_code
+        WHERE p.status = 'pending'
         ''')
         pending_payments = cursor.fetchall()
         
         for payment in pending_payments:
-            invoice_id, user_id, worker_code, amount, product_id = payment
-            
             # Проверяем статус через API
             response = requests.get(
                 f"{CRYPTOBOT_API}/getInvoices",
                 headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
-                params={"invoice_ids": invoice_id}
+                params={"invoice_ids": payment['invoice_id']}
             )
             
+            if not response.ok:
+                continue
+                
             data = response.json()
             if data.get('result'):
                 invoice = data['result'][0]
                 if invoice['status'] == 'paid':
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
                     # Обновляем статус платежа
                     cursor.execute('''
-                    UPDATE payments SET status = 'paid', updated_at = ?
+                    UPDATE payments 
+                    SET status = 'paid', updated_at = ? 
                     WHERE invoice_id = ?
-                    ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), invoice_id))
-                    
-                    # Находим worker_id
-                    cursor.execute('''
-                    SELECT worker_id FROM workers WHERE worker_code = ?
-                    ''', (worker_code,))
-                    worker = cursor.fetchone()
-                    worker_id = worker[0] if worker else None
-                    
-                    # Отправляем уведомление админу
-                    if worker_id:
-                        await context.bot.send_message(
-                            chat_id=1470249044,
-                            text=f"💸 Новая оплата!\n"
-                                 f"👷 Worker ID: {worker_id}\n"
-                                 f"💰 Профит: {amount} USDT"
+                    ''', (current_time, payment['invoice_id']))
+
+                    # Получаем информацию о товаре
+                    product = PRODUCTS_DATA.get(payment['product_id'], {})
+                    product_name = product.get('name', 'Неизвестный товар')
+
+                    # Обновляем статистику воркера
+                    if payment['worker_id']:
+                        cursor.execute('''
+                        INSERT INTO referrals (
+                            worker_id, visitor_id, payment_received, 
+                            payment_amount, payment_date, payment_tx,
+                            visit_date
                         )
-                    
+                        VALUES (?, ?, 1, ?, ?, ?, ?)
+                        ''', (
+                            payment['worker_id'],
+                            payment['user_id'],
+                            payment['amount'],
+                            current_time,
+                            payment['invoice_id'],
+                            current_time
+                        ))
+
+                        # Уведомляем воркера
+                        try:
+                            await context.bot.send_message(
+                                chat_id=payment['worker_telegram_id'],
+                                text=(
+                                    f"💰 Новая оплата по вашей ссылке!\n"
+                                    f"Сумма: {payment['amount']} USDT"
+                                )
+                            )
+                        except Exception as e:
+                            print(f"Ошибка при отправке уведомления воркеру: {e}")
+
+                    # Уведомляем покупателя
+                    try:
+                        await context.bot.send_message(
+                            chat_id=payment['user_id'],
+                            text=(
+                                "✅ Ваш платеж успешно получен!\n"
+                                "Мы скоро свяжемся с вами для уточнения деталей доставки."
+                            )
+                        )
+                    except Exception as e:
+                        print(f"Ошибка при отправке уведомления покупателю: {e}")
+
+                    # Уведомляем админа
+                    try:
+                        admin_message = (
+                            f"💰 Новая оплата!\n"
+                            f"👤 Покупатель: ID: {payment['user_id']}\n"
+                            f"💵 Сумма: {payment['amount']} USDT\n"
+                            f"🏷 Товар: {product_name}\n"
+                            f"👨‍💼 Воркер: {payment['worker_code']}\n"
+                            f"🆔 ID платежа: {payment['invoice_id']}\n"
+                            f"⏰ Время: {current_time}"
+                        )
+                        await context.bot.send_message(
+                            chat_id=ADMIN_ID,
+                            text=admin_message
+                        )
+                    except Exception as e:
+                        print(f"Ошибка при отправке уведомления админу: {e}")
+
                     conn.commit()
                     
     except Exception as e:
         print(f"Ошибка при проверке платежей: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 
@@ -861,7 +916,7 @@ async def show_payment(update: Update, product_id: str) -> None:
         # Показываем интерфейс оплаты
         keyboard = [
             [InlineKeyboardButton(f"💳 Оплатить {amount} USDT", url=invoice['pay_url'])],
-            [InlineKeyboardButton("✅ Проверить оплату", callback_data=f"confirm_paid_{invoice['invoice_id']}")]
+            [InlineKeyboardButton("🔙 Вернуться в меню", callback_data="main_menu")]
         ]
 
         await query.edit_message_caption(
@@ -870,7 +925,7 @@ async def show_payment(update: Update, product_id: str) -> None:
                 f"<b>Сумма:</b> {amount} USDT\n\n"
                 f"1️⃣ Нажмите кнопку «Оплатить» для перехода к оплате\n"
                 f"2️⃣ Оплатите счет в течение 60 минут\n"
-                f"3️⃣ После оплаты нажмите «Проверить оплату»"
+                f"3️⃣ После успешной оплаты вы получите уведомление"
             ),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='HTML'
