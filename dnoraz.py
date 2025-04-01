@@ -937,11 +937,9 @@ async def show_payment(update: Update, product_id: str) -> None:
     user_id = update.effective_user.id
 
     try:
-        print(f"🔄 Создание платежа для пользователя {user_id}, товар {product_id}")
-        
         product = PRODUCTS_DATA[product_id]
         amount = float(product['price'].split()[0])
-        
+
         # Создаем инвойс
         response = requests.post(
             f"{CRYPTOBOT_API}/createInvoice",
@@ -959,10 +957,7 @@ async def show_payment(update: Update, product_id: str) -> None:
             raise Exception("Ошибка при создании платежа в CryptoBot")
             
         invoice = response.json()['result']
-        
-        # Генерируем уникальный идентификатор для платежа
-        payment_id = f"P{int(datetime.now().timestamp())}"
-        
+
         # Сохраняем платеж в БД
         with sqlite3.connect('workers.db') as conn:
             cursor = conn.cursor()
@@ -1609,7 +1604,7 @@ async def manual_payment_confirmation(update: Update, context: ContextTypes.DEFA
                     current_time
                 ))
                 
-                # Уведомляем воркеру
+                # Уведомляем воркера
                 if payment['worker_telegram_id']:
                     try:
                         await context.bot.send_message(
