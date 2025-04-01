@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 # Конфигурация
 BOT_USERNAME = 'OdnorazkiGash_bot'
-TOKEN = "7540707878:AAGyR9e5cAlxsmaEuzzvqOGkwdXEa2zQmJE"
+TOKEN = "7683476302:AAFIG1xhxu_nlr0QwL0ODILT9X_DXCYaEqw"
 CRYPTOBOT_TOKEN = "362476:AAm3PuFC1uXxJEjnEyXfVGJ40GoKhHWLYY0"
 CRYPTOBOT_API = "https://pay.crypt.bot/api"
 ADMIN_ID = "1470249044"
@@ -163,7 +163,7 @@ def get_worker_stats(worker_id: int) -> dict:
     return stats
 
 async def check_worker_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проверка статистики воркера (только оплаты и профит)"""
+    """Проверка статистики воркера за 24 часа и общей"""
     try:
         if not context.args:
             await update.message.reply_text("❌ Укажите код воркера!")
@@ -171,28 +171,108 @@ async def check_worker_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         worker_code = context.args[0]
         conn = sqlite3.connect('workers.db')
+        conn.row_factory = sqlite3.Row
 
         try:
             cursor = conn.cursor()
-            cursor.execute('SELECT telegram_id FROM workers WHERE worker_code = ?', (worker_code,))
-            if not (worker_data := cursor.fetchone()):
+            
+            # Получаем информацию о воркере и общую статистику
+            cursor.execute('''
+            SELECT w.*, 
+                   COUNT(DISTINCT r.visitor_id) as total_visitors,
+                   COUNT(DISTINCT CASE WHEN r.visit_date >= datetime('now', 'start of day', '+3 hours') THEN r.visitor_id END) as visitors_24h,
+                   COUNT(CASE WHEN r.payment_received = 1 THEN 1 END) as total_payments,
+                   COALESCE(SUM(CASE WHEN r.payment_received = 1 THEN r.payment_amount END), 0) as total_profit,
+                   COUNT(CASE WHEN r.payment_received = 1 
+                             AND r.payment_date >= datetime('now', 'start of day', '+3 hours') THEN 1 END) as payments_24h,
+                   COALESCE(SUM(CASE WHEN r.payment_received = 1 
+                                    AND r.payment_date >= datetime('now', 'start of day', '+3 hours') 
+                                    THEN r.payment_amount END), 0) as profit_24h
+            FROM workers w
+            LEFT JOIN referrals r ON w.worker_id = r.worker_id
+            WHERE w.worker_code = ?
+            GROUP BY w.worker_id
+            ''', (worker_code,))
+            
+            stats = cursor.fetchone()
+            
+            if not stats:
                 await update.message.reply_text("❌ Воркер не найден!")
                 return
 
-            stats = get_worker_stats(worker_data[0])
-            await update.message.reply_text(
-                f"📊 Статистика воркера {worker_code}:\n"
-                f"💰 Оплаты: {stats['payments']}\n"
-                f"💵 Профит: {stats['profit']:.2f} USDT\n"
-                f"🔄 Обновлено: {stats['last_update']}",
-                parse_mode='HTML'
+            # Формируем отчет
+            report = (
+                f"📊 Статистика воркера {worker_code}\n"
+                f"➖➖➖➖➖➖➖➖➖\n\n"
+                
+                f"📈 Общая статистика:\n"
+                f"• Всего переходов: {stats['total_visitors']}\n"
+                f"• Всего оплат: {stats['total_payments']}\n"
+                f"• Общий профит: {stats['total_profit']:.2f} USDT\n\n"
+                
+                f"⌛ За сегодня (с 00:00 МСК):\n"
+                f"• Переходов: {stats['visitors_24h']}\n"
+                f"• Оплат: {stats['payments_24h']}\n"
+                f"• Профит: {stats['profit_24h']:.2f} USDT\n\n"
+                
+                f"🔄 Обновлено: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} МСК"
             )
+
+            await update.message.reply_text(report)
+
         finally:
             conn.close()
     except Exception as e:
         print(f"Ошибка в check_worker_stats: {e}")
         await update.message.reply_text("⚠️ Ошибка при проверке статистики")
 
+async def reset_daily_stats():
+    """Сброс ежедневной статистики в 00:00 по МСК"""
+    try:
+        conn = sqlite3.connect('workers.db')
+        cursor = conn.cursor()
+
+        # Создаем таблицу для хранения дневной статистики, если её нет
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS daily_stats (
+            date TEXT PRIMARY KEY,
+            worker_id INTEGER,
+            visits INTEGER DEFAULT 0,
+            payments INTEGER DEFAULT 0,
+            profit REAL DEFAULT 0,
+            FOREIGN KEY (worker_id) REFERENCES workers(worker_id)
+        )''')
+
+        # Сохраняем статистику за предыдущий день
+        cursor.execute('''
+        INSERT INTO daily_stats (date, worker_id, visits, payments, profit)
+        SELECT 
+            date('now', '-1 day'),
+            w.worker_id,
+            COUNT(DISTINCT CASE WHEN r.visit_date >= datetime('now', 'start of day', '-21 hours') 
+                               AND r.visit_date < datetime('now', 'start of day', '+3 hours') 
+                               THEN r.visitor_id END),
+            COUNT(CASE WHEN r.payment_received = 1 
+                      AND r.payment_date >= datetime('now', 'start of day', '-21 hours')
+                      AND r.payment_date < datetime('now', 'start of day', '+3 hours')
+                      THEN 1 END),
+            COALESCE(SUM(CASE WHEN r.payment_received = 1 
+                             AND r.payment_date >= datetime('now', 'start of day', '-21 hours')
+                             AND r.payment_date < datetime('now', 'start of day', '+3 hours')
+                             THEN r.payment_amount END), 0)
+        FROM workers w
+        LEFT JOIN referrals r ON w.worker_id = r.worker_id
+        GROUP BY w.worker_id
+        ''')
+
+        conn.commit()
+        print(f"Статистика успешно обновлена в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    except Exception as e:
+        print(f"Ошибка при обновлении статистики: {e}")
+    finally:
+        if conn:
+            conn.close()
 
 async def worker_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Меню воркера с функцией регистрации"""
@@ -739,17 +819,24 @@ async def show_payment(update: Update, product_id: str) -> None:
                 "asset": "USDT",
                 "amount": str(amount),
                 "description": f"Покупка: {product['name']}",
-                "paid_btn_url": f"https://t.me/{BOT_USERNAME}"
+                "paid_btn_url": f"https://t.me/{BOT_USERNAME}",
+                "expires_in": 3600  # Срок действия инвойса - 1 час
             }
         )
+        
+        if not response.ok:
+            raise Exception("Ошибка при создании платежа в CryptoBot")
+            
         invoice = response.json()['result']
 
-        # Сохраняем платеж
+        # Сохраняем платеж в БД
         with sqlite3.connect('workers.db') as conn:
-            # Получаем код воркера
             cursor = conn.cursor()
+            
+            # Получаем код воркера
             cursor.execute('''
-            SELECT w.worker_code FROM referrals r
+            SELECT w.worker_code 
+            FROM referrals r
             JOIN workers w ON r.worker_id = w.worker_id
             WHERE r.visitor_id = ?
             ORDER BY r.visit_date DESC LIMIT 1
@@ -758,8 +845,11 @@ async def show_payment(update: Update, product_id: str) -> None:
             worker_code = result[0] if result else "UNKNOWN"
 
             # Сохраняем платеж
-            conn.execute('''
-            INSERT INTO payments (invoice_id, user_id, worker_code, amount, product_id, status, created_at)
+            cursor.execute('''
+            INSERT INTO payments (
+                invoice_id, user_id, worker_code, amount, 
+                product_id, status, created_at
+            )
             VALUES (?, ?, ?, ?, ?, 'pending', ?)
             ''', (
                 invoice['invoice_id'],
@@ -769,147 +859,55 @@ async def show_payment(update: Update, product_id: str) -> None:
                 product_id,
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ))
+            conn.commit()
 
         # Показываем интерфейс оплаты
         keyboard = [
             [InlineKeyboardButton(f"💳 Оплатить {amount} USDT", url=invoice['pay_url'])],
-            [InlineKeyboardButton("✅ Я оплатил", callback_data=f"confirm_paid_{invoice['invoice_id']}")]
+            [InlineKeyboardButton("✅ Проверить оплату", callback_data=f"confirm_paid_{invoice['invoice_id']}")]
         ]
 
         await query.edit_message_caption(
-            caption=f"<b>Товар:</b> {product['name']}\n<b>Сумма:</b> {amount} USDT",
+            caption=(
+                f"<b>Товар:</b> {product['name']}\n"
+                f"<b>Сумма:</b> {amount} USDT\n\n"
+                f"1️⃣ Нажмите кнопку «Оплатить» для перехода к оплате\n"
+                f"2️⃣ Оплатите счет в течение 60 минут\n"
+                f"3️⃣ После оплаты нажмите «Проверить оплату»"
+            ),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='HTML'
         )
 
     except Exception as e:
-        await query.message.reply_text(f"Ошибка: {str(e)}")
-        
-        
-async def handle_payment_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка ручной проверки оплаты"""
-    query = update.callback_query
-    await query.answer()
-    
-    invoice_id = query.data.replace("check_payment_", "")
-    
-    try:
-        # Проверяем статус платежа
-        response = requests.get(
-            f"{CRYPTOBOT_API}/getInvoices",
-            headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
-            params={"invoice_ids": invoice_id}
+        print(f"Ошибка при создании платежа: {e}")
+        await query.message.reply_text(
+            "❌ Произошла ошибка при создании платежа.\n"
+            "Пожалуйста, попробуйте позже или обратитесь в поддержку."
         )
-        
-        data = response.json()
-        if data.get('result'):
-            invoice = data['result'][0]
-            if invoice['status'] == 'paid':
-                await query.message.reply_text("✅ Оплата подтверждена! Спасибо за покупку.")
-            else:
-                await query.message.reply_text("⚠️ Платеж еще не поступил. Попробуйте проверить позже.")
-        else:
-            await query.message.reply_text("❌ Не удалось проверить платеж. Попробуйте позже.")
-            
-    except Exception as e:
-        await query.message.reply_text(f"❌ Ошибка при проверке платежа: {str(e)}")
 
-
-async def safe_edit_or_reply(query, text: str):
-    """Безопасное редактирование сообщения или отправка нового"""
-    try:
-        if query.message.photo:
-            await query.message.edit_caption(caption=text, reply_markup=None)
-        else:
-            await query.edit_message_text(text)
-    except BadRequest:
-        await query.message.reply_text(text)
-
-
-# Команда для ручного начисления
-async def pay_worker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ручное начисление средств воркеру"""
-    if str(update.effective_user.id) != ADMIN_ID:
-        await update.message.reply_text("❌ Команда только для администратора!")
-        return
-
-    try:
-        if len(context.args) < 2:
-            await update.message.reply_text("❌ Используйте: /pay <код_воркера> <сумма>")
-            return
-
-        worker_code = context.args[0]
-        amount = float(context.args[1])
-
-        with sqlite3.connect('workers.db') as conn:
-            cursor = conn.cursor()
-
-            # 1. Находим воркера
-            cursor.execute('SELECT worker_id FROM workers WHERE worker_code = ?', (worker_code,))
-            worker = cursor.fetchone()
-
-            if not worker:
-                await update.message.reply_text(f"❌ Воркер с кодом {worker_code} не найден!")
-                return
-
-            worker_id = worker[0]
-
-            # 2. Начисляем средства
-            cursor.execute('''
-            INSERT INTO referrals (worker_id, visitor_id, payment_received, payment_amount, payment_date)
-            VALUES (?, ?, 1, ?, ?)
-            ''', (
-                worker_id,
-                int(datetime.now().timestamp()),  # Используем timestamp как visitor_id для ручных начислений
-                amount,
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            ))
-
-            conn.commit()
-
-            # 3. Получаем обновленную статистику
-            cursor.execute('''
-            SELECT 
-                COUNT(*) as total_payments,
-                COALESCE(SUM(payment_amount), 0) as total_profit
-            FROM referrals
-            WHERE worker_id = ? AND payment_received = 1
-            ''', (worker_id,))
-
-            stats = cursor.fetchone()
-
-            await update.message.reply_text(
-                f"✅ Успешно начислено {amount} USDT воркеру {worker_code}\n\n"
-                f"📊 Общая статистика:\n"
-                f"• Всего платежей: {stats['total_payments']}\n"
-                f"• Общий профит: {stats['total_profit']:.2f} USDT"
-            )
-
-    except ValueError:
-        await update.message.reply_text("❌ Неверный формат суммы! Используйте число.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {str(e)}")
-        
 async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработка подтверждения оплаты с уведомлением админа"""
+    """Обработка подтверждения оплаты"""
     query = update.callback_query
     await query.answer()
     
     try:
         invoice_id = query.data.replace("confirm_paid_", "")
         user_id = query.from_user.id
+        user_name = query.from_user.username or "Без username"
         
         with sqlite3.connect('workers.db') as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # Проверяем статус платежа
+            # Получаем информацию о платеже
             cursor.execute('''
             SELECT p.*, w.worker_code 
             FROM payments p
             LEFT JOIN workers w ON p.worker_code = w.worker_code
             WHERE p.invoice_id = ?
             ''', (invoice_id,))
+            
             payment = cursor.fetchone()
             
             if not payment:
@@ -917,19 +915,26 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
                 return
                 
             if payment['status'] == 'paid':
-                await query.message.reply_text("✅ Этот платеж уже подтвержден")
+                await query.message.reply_text(
+                    "✅ Этот платеж уже подтвержден!\n"
+                    "Мы скоро свяжемся с вами для уточнения деталей доставки."
+                )
                 return
             
-            # Проверяем статус через CryptoPay API
+            # Проверяем статус через CryptoBot API
             response = requests.get(
                 f"{CRYPTOBOT_API}/getInvoices",
                 headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
                 params={"invoice_ids": invoice_id}
             )
             
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('result') and data['result'][0]['status'] == 'paid':
+            if not response.ok:
+                raise Exception("Ошибка при проверке платежа в CryptoBot")
+            
+            data = response.json()
+            if data.get('result'):
+                invoice = data['result'][0]
+                if invoice['status'] == 'paid':
                     # Обновляем статус платежа
                     cursor.execute('''
                     UPDATE payments 
@@ -937,35 +942,71 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
                     WHERE invoice_id = ?
                     ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), invoice_id))
                     
+                    # Получаем информацию о товаре
+                    product = PRODUCTS_DATA.get(payment['product_id'], {})
+                    product_name = product.get('name', 'Неизвестный товар')
+                    
+                    # Обновляем статистику воркера
+                    if payment['worker_code'] != "UNKNOWN":
+                        cursor.execute('''
+                        INSERT INTO referrals (
+                            worker_id, visitor_id, payment_received, 
+                            payment_amount, payment_date, payment_tx
+                        )
+                        SELECT 
+                            w.worker_id, ?, 1, ?, ?, ?
+                        FROM workers w 
+                        WHERE w.worker_code = ?
+                        ''', (
+                            user_id,
+                            payment['amount'],
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            invoice_id,
+                            payment['worker_code']
+                        ))
+                    
                     # Отправляем уведомление админу
                     admin_message = (
                         f"💰 Новая оплата!\n"
-                        f"Сумма: {payment['amount']} USDT\n"
-                        f"От пользователя: {user_id}\n"
-                        f"Воркер: {payment['worker_code']}\n"
-                        f"ID платежа: {invoice_id}"
+                        f"👤 Покупатель: @{user_name} (ID: {user_id})\n"
+                        f"💵 Сумма: {payment['amount']} USDT\n"
+                        f"🏷 Товар: {product_name}\n"
+                        f"👨‍💼 Воркер: {payment['worker_code']}\n"
+                        f"🆔 ID платежа: {invoice_id}\n"
+                        f"⏰ Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                     )
                     await context.bot.send_message(
                         chat_id=ADMIN_ID,
-                        text=admin_message,
-                        parse_mode='HTML'
+                        text=admin_message
                     )
                     
                     conn.commit()
-                    await query.message.reply_text(
-                        "✅ Оплата подтверждена! Спасибо за покупку.\n"
-                        "Мы свяжемся с вами для уточнения деталей доставки."
+                    
+                    # Обновляем сообщение с оплатой
+                    keyboard = [[InlineKeyboardButton("🔙 Вернуться в меню", callback_data="main_menu")]]
+                    await query.edit_message_caption(
+                        caption=(
+                            "✅ Оплата успешно подтверждена!\n\n"
+                            "Мы скоро свяжемся с вами для уточнения деталей доставки."
+                        ),
+                        reply_markup=InlineKeyboardMarkup(keyboard)
                     )
                 else:
-                    await query.message.reply_text(
-                        "⚠️ Оплата еще не поступила. Пожалуйста, подождите или проверьте статус позже."
+                    # Если платёж ещё не оплачен
+                    await query.answer(
+                        "⚠️ Оплата ещё не поступила!\n"
+                        "Проверьте, что вы завершили оплату в CryptoBot",
+                        show_alert=True
                     )
             else:
-                await query.message.reply_text("❌ Ошибка при проверке платежа")
+                raise Exception("Нет данных об инвойсе от CryptoBot")
                 
     except Exception as e:
         print(f"Ошибка при подтверждении платежа: {e}")
-        await query.message.reply_text("⚠️ Произошла ошибка при проверке платежа")
+        await query.message.reply_text(
+            "⚠️ Произошла ошибка при проверке платежа.\n"
+            "Пожалуйста, попробуйте снова через несколько минут."
+        )
 
 # Добавляем тестовую команду
 async def test_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1176,6 +1217,15 @@ async def run_bot():
         'interval',
         seconds=30,
         args=[application]
+    )
+
+    # Добавляем задачу на обновление статистики в 00:00 по МСК
+    scheduler.add_job(
+        reset_daily_stats,
+        'cron',
+        hour=0,
+        minute=0,
+        timezone='Europe/Moscow'
     )
 
 
