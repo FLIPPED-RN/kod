@@ -1268,6 +1268,132 @@ async def confirm_payment(update: Update, product_id: str) -> None:
     await query.answer()
     await query.message.reply_text("Платеж обрабатывается...")    
     
+async def manual_payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ручное подтверждение оплаты без проверки"""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        # Получаем ID инвойса из данных колбэка
+        invoice_id = query.data.replace("manual_confirm_", "")
+        user_id = query.from_user.id
+        user_name = query.from_user.username or "Без username"
+        
+        print(f"📝 Ручное подтверждение платежа {invoice_id} от пользователя {user_id}")
+        
+        with sqlite3.connect('workers.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Получаем информацию о платеже
+            cursor.execute('''
+            SELECT p.*, w.worker_code, w.worker_id, w.telegram_id as worker_telegram_id
+            FROM payments p
+            LEFT JOIN workers w ON p.worker_code = w.worker_code
+            WHERE p.invoice_id = ?
+            ''', (invoice_id,))
+            
+            payment = cursor.fetchone()
+            
+            if not payment:
+                await query.message.reply_text("❌ Платеж не найден")
+                return
+                
+            if payment['status'] == 'paid':
+                await query.message.reply_text(
+                    "✅ Этот платеж уже подтвержден!\n"
+                    "Мы скоро свяжемся с вами для уточнения деталей доставки."
+                )
+                return
+            
+            # Обновляем статус платежа
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute('''
+            UPDATE payments 
+            SET status = 'paid', updated_at = ? 
+            WHERE invoice_id = ?
+            ''', (current_time, invoice_id))
+            
+            # Получаем информацию о товаре
+            product = PRODUCTS_DATA.get(payment['product_id'], {})
+            product_name = product.get('name', 'Неизвестный товар')
+            
+            # Обновляем статистику воркера
+            if payment['worker_id']:
+                cursor.execute('''
+                INSERT INTO referrals (
+                    worker_id, visitor_id, payment_received, 
+                    payment_amount, payment_date, payment_tx,
+                    visit_date
+                )
+                VALUES (?, ?, 1, ?, ?, ?, ?)
+                ''', (
+                    payment['worker_id'],
+                    user_id,
+                    payment['amount'],
+                    current_time,
+                    invoice_id,
+                    current_time
+                ))
+                
+                # Уведомляем воркера
+                if payment['worker_telegram_id']:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=payment['worker_telegram_id'],
+                            text=(
+                                f"💰 Новая оплата по вашей ссылке!\n"
+                                f"Сумма: {payment['amount']} USDT\n"
+                                f"Товар: {product_name}"
+                            )
+                        )
+                        print(f"✅ Уведомление отправлено воркеру {payment['worker_telegram_id']}")
+                    except Exception as e:
+                        print(f"❌ Ошибка при отправке уведомления воркеру: {e}")
+            
+            # Отправляем уведомление админу
+            admin_message = (
+                f"💰 Новая оплата (ручное подтверждение)!\n"
+                f"👤 Покупатель: @{user_name} (ID: {user_id})\n"
+                f"💵 Сумма: {payment['amount']} USDT\n"
+                f"🏷 Товар: {product_name}\n"
+                f"👨‍💼 Воркер: {payment['worker_code']}\n"
+                f"🆔 ID платежа: {invoice_id}\n"
+                f"⏰ Время: {current_time}"
+            )
+            
+            try:
+                # Преобразуем ADMIN_ID в int если это строка
+                admin_id = int(ADMIN_ID) if isinstance(ADMIN_ID, str) else ADMIN_ID
+                
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=admin_message
+                )
+                print(f"✅ Уведомление отправлено админу")
+            except Exception as e:
+                print(f"❌ Ошибка при отправке уведомления админу: {e}")
+            
+            conn.commit()
+            
+            # Обновляем сообщение с оплатой
+            keyboard = [[InlineKeyboardButton("🔙 Вернуться в меню", callback_data="main_menu")]]
+            await query.edit_message_caption(
+                caption=(
+                    "✅ Оплата успешно подтверждена!\n\n"
+                    "Мы скоро свяжемся с вами для уточнения деталей доставки."
+                ),
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+                
+    except Exception as e:
+        print(f"❌ Ошибка при ручном подтверждении платежа: {e}")
+        print(f"Полная трассировка: {traceback.format_exc()}")
+        await query.message.reply_text(
+            "⚠️ Произошла ошибка при подтверждении платежа.\n"
+            "Пожалуйста, попробуйте снова через несколько минут."
+        )
+    
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Улучшенный обработчик нажатий на кнопки с полным логгированием"""
     query = update.callback_query
@@ -1535,129 +1661,3 @@ def main():
 if __name__ == "__main__":
     print("=== Запуск бота ===")
     main()
-
-async def manual_payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Ручное подтверждение оплаты без проверки"""
-    query = update.callback_query
-    await query.answer()
-    
-    try:
-        # Получаем ID инвойса из данных колбэка
-        invoice_id = query.data.replace("manual_confirm_", "")
-        user_id = query.from_user.id
-        user_name = query.from_user.username or "Без username"
-        
-        print(f"📝 Ручное подтверждение платежа {invoice_id} от пользователя {user_id}")
-        
-        with sqlite3.connect('workers.db') as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            # Получаем информацию о платеже
-            cursor.execute('''
-            SELECT p.*, w.worker_code, w.worker_id, w.telegram_id as worker_telegram_id
-            FROM payments p
-            LEFT JOIN workers w ON p.worker_code = w.worker_code
-            WHERE p.invoice_id = ?
-            ''', (invoice_id,))
-            
-            payment = cursor.fetchone()
-            
-            if not payment:
-                await query.message.reply_text("❌ Платеж не найден")
-                return
-                
-            if payment['status'] == 'paid':
-                await query.message.reply_text(
-                    "✅ Этот платеж уже подтвержден!\n"
-                    "Мы скоро свяжемся с вами для уточнения деталей доставки."
-                )
-                return
-            
-            # Обновляем статус платежа
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            cursor.execute('''
-            UPDATE payments 
-            SET status = 'paid', updated_at = ? 
-            WHERE invoice_id = ?
-            ''', (current_time, invoice_id))
-            
-            # Получаем информацию о товаре
-            product = PRODUCTS_DATA.get(payment['product_id'], {})
-            product_name = product.get('name', 'Неизвестный товар')
-            
-            # Обновляем статистику воркера
-            if payment['worker_id']:
-                cursor.execute('''
-                INSERT INTO referrals (
-                    worker_id, visitor_id, payment_received, 
-                    payment_amount, payment_date, payment_tx,
-                    visit_date
-                )
-                VALUES (?, ?, 1, ?, ?, ?, ?)
-                ''', (
-                    payment['worker_id'],
-                    user_id,
-                    payment['amount'],
-                    current_time,
-                    invoice_id,
-                    current_time
-                ))
-                
-                # Уведомляем воркера
-                if payment['worker_telegram_id']:
-                    try:
-                        await context.bot.send_message(
-                            chat_id=payment['worker_telegram_id'],
-                            text=(
-                                f"💰 Новая оплата по вашей ссылке!\n"
-                                f"Сумма: {payment['amount']} USDT\n"
-                                f"Товар: {product_name}"
-                            )
-                        )
-                        print(f"✅ Уведомление отправлено воркеру {payment['worker_telegram_id']}")
-                    except Exception as e:
-                        print(f"❌ Ошибка при отправке уведомления воркеру: {e}")
-            
-            # Отправляем уведомление админу
-            admin_message = (
-                f"💰 Новая оплата (ручное подтверждение)!\n"
-                f"👤 Покупатель: @{user_name} (ID: {user_id})\n"
-                f"💵 Сумма: {payment['amount']} USDT\n"
-                f"🏷 Товар: {product_name}\n"
-                f"👨‍💼 Воркер: {payment['worker_code']}\n"
-                f"🆔 ID платежа: {invoice_id}\n"
-                f"⏰ Время: {current_time}"
-            )
-            
-            try:
-                # Преобразуем ADMIN_ID в int если это строка
-                admin_id = int(ADMIN_ID) if isinstance(ADMIN_ID, str) else ADMIN_ID
-                
-                await context.bot.send_message(
-                    chat_id=admin_id,
-                    text=admin_message
-                )
-                print(f"✅ Уведомление отправлено админу")
-            except Exception as e:
-                print(f"❌ Ошибка при отправке уведомления админу: {e}")
-            
-            conn.commit()
-            
-            # Обновляем сообщение с оплатой
-            keyboard = [[InlineKeyboardButton("🔙 Вернуться в меню", callback_data="main_menu")]]
-            await query.edit_message_caption(
-                caption=(
-                    "✅ Оплата успешно подтверждена!\n\n"
-                    "Мы скоро свяжемся с вами для уточнения деталей доставки."
-                ),
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-                
-    except Exception as e:
-        print(f"❌ Ошибка при ручном подтверждении платежа: {e}")
-        print(f"Полная трассировка: {traceback.format_exc()}")
-        await query.message.reply_text(
-            "⚠️ Произошла ошибка при подтверждении платежа.\n"
-            "Пожалуйста, попробуйте снова через несколько минут."
-        )
