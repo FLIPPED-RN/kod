@@ -983,7 +983,7 @@ async def send_payment_notifications(context: ContextTypes.DEFAULT_TYPE, payment
 
 # Модифицируем функцию show_payment, чтобы правильно создавать и сохранять платежи
 async def show_payment(update: Update, product_id: str) -> None:
-    """Создание платежа с улучшенным процессом подтверждения"""
+    """Создание платежа"""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -1016,54 +1016,46 @@ async def show_payment(update: Update, product_id: str) -> None:
             
             # Получаем код воркера
             cursor.execute('''
-            SELECT w.worker_code, w.worker_id, w.telegram_id
+            SELECT w.worker_code 
             FROM referrals r
             JOIN workers w ON r.worker_id = w.worker_id
             WHERE r.visitor_id = ?
             ORDER BY r.visit_date DESC LIMIT 1
             ''', (user_id,))
-            
             result = cursor.fetchone()
             worker_code = result[0] if result else "UNKNOWN"
-            worker_id = result[1] if result else None
-            worker_telegram_id = result[2] if result else None
 
             # Сохраняем платеж
             cursor.execute('''
             INSERT INTO payments (
-                invoice_id, user_id, worker_code, worker_id, worker_telegram_id,
-                amount, product_id, status, created_at
+                invoice_id, user_id, worker_code, amount, 
+                product_id, status, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?)
             ''', (
                 invoice['invoice_id'],
                 user_id,
                 worker_code,
-                worker_id,
-                worker_telegram_id,
                 amount,
                 product_id,
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ))
             conn.commit()
 
-        # Показываем интерфейс оплаты с улучшенным дизайном
+        # Показываем интерфейс оплаты
         keyboard = [
             [InlineKeyboardButton(f"💳 Оплатить {amount} USDT", url=invoice['pay_url'])],
-            [InlineKeyboardButton("✅ Я оплатил", callback_data=f"check_payment_{invoice['invoice_id']}")],
+            [InlineKeyboardButton("✅ Я оплатил", callback_data=f"manual_confirm_{invoice['invoice_id']}")],
             [InlineKeyboardButton("🔙 Вернуться в меню", callback_data="main_menu")]
         ]
 
         await query.edit_message_caption(
             caption=(
-                f"<b>💳 Оплата товара</b>\n\n"
                 f"<b>Товар:</b> {product['name']}\n"
                 f"<b>Сумма:</b> {amount} USDT\n\n"
-                f"<b>Инструкция по оплате:</b>\n"
-                f"1️⃣ Нажмите кнопку «Оплатить»\n"
+                f"1️⃣ Нажмите кнопку «Оплатить» для перехода к оплате\n"
                 f"2️⃣ Оплатите счет через CryptoBot\n"
-                f"3️⃣ Вернитесь сюда и нажмите «Я оплатил»\n\n"
-                f"<i>Счет действителен в течение 1 часа</i>"
+                f"3️⃣ После оплаты вернитесь сюда и нажмите «Я оплатил»"
             ),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='HTML'
@@ -1491,9 +1483,9 @@ async def manual_payment_confirmation(update: Update, context: ContextTypes.DEFA
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # Получаем информацию о платеже
+            # Получаем информацию о платеже и воркере
             cursor.execute('''
-            SELECT p.*, w.worker_code, w.worker_id, w.telegram_id as worker_telegram_id
+            SELECT p.*, w.worker_id, w.telegram_id as worker_telegram_id
             FROM payments p
             LEFT JOIN workers w ON p.worker_code = w.worker_code
             WHERE p.invoice_id = ?
