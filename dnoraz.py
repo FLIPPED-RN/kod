@@ -308,7 +308,7 @@ async def worker_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             await update.message.reply_text(welcome_message)
 
-            # Уведомляем админа о новой регистрации
+            # Уведомляем админу о новой регистрации
             admin_message = (
                 f"👤 Новый воркер зарегистрирован!\n"
                 f"ID: {user_id}\n"
@@ -379,7 +379,7 @@ def generate_ref_link(worker_code):
 
 async def check_payments(context: ContextTypes.DEFAULT_TYPE):
     """Периодическая проверка неоплаченных платежей"""
-    print("🔄 Начало проверки платежей...")
+    print("\n=== 🔄 Начало проверки платежей ===")
     try:
         conn = sqlite3.connect('workers.db')
         conn.row_factory = sqlite3.Row
@@ -397,117 +397,174 @@ async def check_payments(context: ContextTypes.DEFAULT_TYPE):
         print(f"📝 Найдено {len(pending_payments)} неподтвержденных платежей")
         
         for payment in pending_payments:
-            print(f"🔍 Проверка платежа {payment['invoice_id']}")
-            # Проверяем статус через API
-            response = requests.get(
-                f"{CRYPTOBOT_API}/getInvoices",
-                headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
-                params={"invoice_ids": payment['invoice_id']}
-            )
+            print(f"\n🔍 Проверка платежа {payment['invoice_id']}")
             
-            print(f"📡 Ответ API: {response.status_code}")
-            print(f"📄 Содержимое ответа: {response.text}")
-            
-            if not response.ok:
-                print(f"❌ Ошибка API: {response.status_code}")
-                continue
+            try:
+                # Проверяем статус через API
+                api_url = f"{CRYPTOBOT_API}/getInvoices"
+                headers = {"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN}
+                params = {"invoice_ids": payment['invoice_id']}
                 
-            data = response.json()
-            if not data.get('result'):
-                print("❌ Нет данных в ответе API")
-                continue
-
-            invoice = data['result'][0]
-            print(f"💳 Статус платежа: {invoice['status']}")
-            
-            if invoice['status'] == 'paid':
-                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                print(f"✅ Платеж {payment['invoice_id']} подтвержден!")
+                print(f"📡 Отправка запроса к API: {api_url}")
+                print(f"📋 Параметры: {params}")
+                print(f"📋 Заголовки: {headers}")
                 
-                # Обновляем статус платежа
-                cursor.execute('''
-                UPDATE payments 
-                SET status = 'paid', updated_at = ? 
-                WHERE invoice_id = ?
-                ''', (current_time, payment['invoice_id']))
+                response = requests.get(
+                    api_url,
+                    headers=headers,
+                    params=params
+                )
+                
+                print(f"📡 Ответ API: {response.status_code}")
+                print(f"📄 Содержимое ответа: {response.text}")
+                
+                if not response.ok:
+                    print(f"❌ Ошибка API: {response.status_code}")
+                    continue
+                    
+                data = response.json()
+                if not data.get('ok'):
+                    print(f"❌ API вернул статус не ok: {data}")
+                    continue
+                    
+                if not data.get('result') or len(data['result']) == 0:
+                    print("❌ Нет данных в ответе API")
+                    continue
 
-                # Получаем информацию о товаре
-                product = PRODUCTS_DATA.get(payment['product_id'], {})
-                product_name = product.get('name', 'Неизвестный товар')
+                invoice = data['result'][0]
+                print(f"💳 Информация о платеже: {invoice}")
+                print(f"💳 Статус платежа: {invoice['status']}")
+                
+                # Проверяем статус платежа (может быть 'active', 'paid' или 'expired')
+                if invoice['status'] == 'paid':
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    print(f"✅ Платеж {payment['invoice_id']} подтвержден!")
+                    
+                    # Проверяем, не обрабатывали ли мы уже этот платеж
+                    cursor.execute('SELECT status FROM payments WHERE invoice_id = ?', (payment['invoice_id'],))
+                    current_status = cursor.fetchone()['status']
+                    
+                    if current_status == 'paid':
+                        print(f"ℹ️ Платеж {payment['invoice_id']} уже был обработан ранее")
+                        continue
+                    
+                    # Обновляем статус платежа
+                    cursor.execute('''
+                    UPDATE payments 
+                    SET status = 'paid', updated_at = ? 
+                    WHERE invoice_id = ?
+                    ''', (current_time, payment['invoice_id']))
+                    print(f"✅ Статус платежа обновлен на 'paid'")
 
-                # Обновляем статистику воркера
-                if payment['worker_id']:
+                    # Получаем информацию о товаре
+                    product = PRODUCTS_DATA.get(payment['product_id'], {})
+                    product_name = product.get('name', 'Неизвестный товар')
+
+                    # Обновляем статистику воркера
+                    if payment['worker_id']:
+                        try:
+                            cursor.execute('''
+                            INSERT INTO referrals (
+                                worker_id, visitor_id, payment_received, 
+                                payment_amount, payment_date, payment_tx,
+                                visit_date
+                            )
+                            VALUES (?, ?, 1, ?, ?, ?, ?)
+                            ''', (
+                                payment['worker_id'],
+                                payment['user_id'],
+                                payment['amount'],
+                                current_time,
+                                payment['invoice_id'],
+                                current_time
+                            ))
+                            print(f"✅ Статистика воркера обновлена")
+                        except Exception as e:
+                            print(f"❌ Ошибка при обновлении статистики воркера: {e}")
+                    else:
+                        print("⚠️ worker_id не найден для платежа")
+
+                    conn.commit()
+                    print(f"✅ Транзакция в БД завершена успешно")
+
+                    # Отправляем уведомления
                     try:
-                        cursor.execute('''
-                        INSERT INTO referrals (
-                            worker_id, visitor_id, payment_received, 
-                            payment_amount, payment_date, payment_tx,
-                            visit_date
+                        # Уведомление админу
+                        admin_message = (
+                            f"💰 Новая оплата!\n"
+                            f"👤 Покупатель: ID {payment['user_id']}\n"
+                            f"💵 Сумма: {payment['amount']} USDT\n"
+                            f"🏷 Товар: {product_name}\n"
+                            f"👨‍💼 Воркер: {payment['worker_code']}\n"
+                            f"🆔 ID платежа: {payment['invoice_id']}\n"
+                            f"⏰ Время: {current_time}"
                         )
-                        VALUES (?, ?, 1, ?, ?, ?, ?)
-                        ''', (
-                            payment['worker_id'],
-                            payment['user_id'],
-                            payment['amount'],
-                            current_time,
-                            payment['invoice_id'],
-                            current_time
-                        ))
-                        print(f"✅ Статистика воркера обновлена")
-                    except Exception as e:
-                        print(f"❌ Ошибка при обновлении статистики воркера: {e}")
-
-                try:
-                    # Уведомляем воркера
-                    if payment['worker_telegram_id']:
+                        print(f"📤 Отправка уведомления админу {ADMIN_ID}")
+                        
+                        # Преобразуем ADMIN_ID в int, если это строка
+                        admin_id = int(ADMIN_ID) if isinstance(ADMIN_ID, str) else ADMIN_ID
+                        
                         await context.bot.send_message(
-                            chat_id=payment['worker_telegram_id'],
+                            chat_id=admin_id,
+                            text=admin_message
+                        )
+                        print("✅ Уведомление админу отправлено")
+
+                        # Уведомление воркеру
+                        if payment['worker_telegram_id']:
+                            print(f"📤 Отправка уведомления воркеру {payment['worker_telegram_id']}")
+                            await context.bot.send_message(
+                                chat_id=payment['worker_telegram_id'],
+                                text=(
+                                    f"💰 Новая оплата по вашей ссылке!\n"
+                                    f"Сумма: {payment['amount']} USDT\n"
+                                    f"Товар: {product_name}"
+                                )
+                            )
+                            print("✅ Уведомление воркеру отправлено")
+                        else:
+                            print("⚠️ ID воркера отсутствует, не отправляем уведомление воркеру")
+
+                        # Уведомление покупателю
+                        print(f"📤 Отправка уведомления покупателю {payment['user_id']}")
+                        await context.bot.send_message(
+                            chat_id=payment['user_id'],
                             text=(
-                                f"💰 Новая оплата по вашей ссылке!\n"
-                                f"Сумма: {payment['amount']} USDT"
+                                "✅ Ваш платеж успешно получен!\n"
+                                "Мы скоро свяжемся с вами для уточнения деталей доставки."
                             )
                         )
-                        print(f"✅ Уведомление отправлено воркеру {payment['worker_telegram_id']}")
+                        print("✅ Уведомление покупателю отправлено")
 
-                    # Уведомляем покупателя
-                    await context.bot.send_message(
-                        chat_id=payment['user_id'],
-                        text=(
-                            "✅ Ваш платеж успешно получен!\n"
-                            "Мы скоро свяжемся с вами для уточнения деталей доставки."
-                        )
-                    )
-                    print(f"✅ Уведомление отправлено покупателю {payment['user_id']}")
-
-                    # Уведомляем админа
-                    admin_message = (
-                        f"💰 Новая оплата!\n"
-                        f"👤 Покупатель: ID: {payment['user_id']}\n"
-                        f"💵 Сумма: {payment['amount']} USDT\n"
-                        f"🏷 Товар: {product_name}\n"
-                        f"👨‍💼 Воркер: {payment['worker_code']}\n"
-                        f"🆔 ID платежа: {payment['invoice_id']}\n"
-                        f"⏰ Время: {current_time}"
-                    )
-                    await context.bot.send_message(
-                        chat_id=ADMIN_ID,
-                        text=admin_message
-                    )
-                    print(f"✅ Уведомление отправлено админу")
-
-                except Exception as e:
-                    print(f"❌ Ошибка при отправке уведомлений: {e}")
-
-                conn.commit()
-                print(f"✅ Транзакция завершена успешно")
+                    except Exception as e:
+                        print(f"❌ Ошибка при отправке уведомлений: {e}")
+                        print(f"Трассировка: {traceback.format_exc()}")
+                
+                elif invoice['status'] == 'active':
+                    print(f"ℹ️ Платеж {payment['invoice_id']} всё ещё активен, ожидаем оплаты")
+                    
+                elif invoice['status'] == 'expired':
+                    print(f"ℹ️ Платеж {payment['invoice_id']} истек срок действия")
+                    # Помечаем платеж как expired в БД
+                    cursor.execute('''
+                    UPDATE payments 
+                    SET status = 'expired', updated_at = ? 
+                    WHERE invoice_id = ?
+                    ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), payment['invoice_id']))
+                    conn.commit()
+                    
+            except Exception as e:
+                print(f"❌ Ошибка при обработке платежа {payment['invoice_id']}: {e}")
+                print(f"Трассировка: {traceback.format_exc()}")
+                continue
                     
     except Exception as e:
-        print(f"❌ Ошибка при проверке платежей: {e}")
+        print(f"❌ Общая ошибка при проверке платежей: {e}")
         print(f"Полная трассировка: {traceback.format_exc()}")
     finally:
-        if conn:
+        if 'conn' in locals() and conn:
             conn.close()
-        print("🔄 Завершение проверки платежей")
+        print("=== 🔄 Завершение проверки платежей ===\n")
 
 
 
@@ -872,7 +929,7 @@ async def show_product(update: Update, product_id: str) -> None:
     )
 
 
-# Модифицируем функцию show_payment (упрощаем, убираем вебхук-логику)
+# Модифицируем функцию show_payment, чтобы правильно создавать и сохранять платежи
 async def show_payment(update: Update, product_id: str) -> None:
     """Создание платежа"""
     query = update.callback_query
@@ -880,58 +937,93 @@ async def show_payment(update: Update, product_id: str) -> None:
     user_id = update.effective_user.id
 
     try:
+        print(f"🔄 Создание платежа для пользователя {user_id}, товар {product_id}")
+        
         product = PRODUCTS_DATA[product_id]
+        # Извлекаем сумму из строки цены (например, "60 usdt" -> 60.0)
         amount = float(product['price'].split()[0])
+        
+        print(f"💰 Сумма платежа: {amount} USDT")
 
-        # Создаем инвойс
+        # Создаем инвойс через API
+        api_url = f"{CRYPTOBOT_API}/createInvoice"
+        headers = {"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN}
+        payload = {
+            "asset": "USDT",
+            "amount": str(amount),
+            "description": f"Покупка: {product['name']}",
+            "paid_btn_name": "viewItem",
+            "paid_btn_url": f"https://t.me/{BOT_USERNAME}",
+            "expires_in": 3600  # Срок действия инвойса - 1 час
+        }
+        
+        print(f"📡 Отправка запроса к API: {api_url}")
+        print(f"📋 Данные запроса: {payload}")
+        
         response = requests.post(
-            f"{CRYPTOBOT_API}/createInvoice",
-            headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
-            json={
-                "asset": "USDT",
-                "amount": str(amount),
-                "description": f"Покупка: {product['name']}",
-                "paid_btn_url": f"https://t.me/{BOT_USERNAME}",
-                "expires_in": 3600  # Срок действия инвойса - 1 час
-            }
+            api_url,
+            headers=headers,
+            json=payload
         )
         
+        print(f"📡 Ответ API: {response.status_code}")
+        print(f"📄 Содержимое ответа: {response.text}")
+        
         if not response.ok:
-            raise Exception("Ошибка при создании платежа в CryptoBot")
+            raise Exception(f"Ошибка API: {response.status_code}, {response.text}")
             
-        invoice = response.json()['result']
+        data = response.json()
+        if not data.get('ok'):
+            raise Exception(f"API вернул статус не ok: {data}")
+            
+        invoice = data['result']
+        print(f"📃 Инвойс создан: {invoice}")
+
+        # Получаем код воркера из БД
+        conn = sqlite3.connect('workers.db')
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Получаем код воркера
+        cursor.execute('''
+        SELECT w.worker_code, w.worker_id 
+        FROM referrals r
+        JOIN workers w ON r.worker_id = w.worker_id
+        WHERE r.visitor_id = ?
+        ORDER BY r.visit_date DESC LIMIT 1
+        ''', (user_id,))
+        result = cursor.fetchone()
+        
+        worker_code = "UNKNOWN"
+        worker_id = None
+        
+        if result:
+            worker_code = result['worker_code']
+            worker_id = result['worker_id']
+            print(f"👨‍💼 Найден воркер: {worker_code} (ID: {worker_id})")
+        else:
+            print("⚠️ Воркер не найден для пользователя")
 
         # Сохраняем платеж в БД
-        with sqlite3.connect('workers.db') as conn:
-            cursor = conn.cursor()
-            
-            # Получаем код воркера
-            cursor.execute('''
-            SELECT w.worker_code 
-            FROM referrals r
-            JOIN workers w ON r.worker_id = w.worker_id
-            WHERE r.visitor_id = ?
-            ORDER BY r.visit_date DESC LIMIT 1
-            ''', (user_id,))
-            result = cursor.fetchone()
-            worker_code = result[0] if result else "UNKNOWN"
-
-            # Сохраняем платеж
-            cursor.execute('''
-            INSERT INTO payments (
-                invoice_id, user_id, worker_code, amount, 
-                product_id, status, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, 'pending', ?)
-            ''', (
-                invoice['invoice_id'],
-                user_id,
-                worker_code,
-                amount,
-                product_id,
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            ))
-            conn.commit()
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute('''
+        INSERT INTO payments (
+            invoice_id, user_id, worker_code, amount, 
+            product_id, status, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+        ''', (
+            invoice['invoice_id'],
+            user_id,
+            worker_code,
+            amount,
+            product_id,
+            current_time,
+            current_time
+        ))
+        
+        conn.commit()
+        print(f"✅ Платеж сохранен в БД с ID: {invoice['invoice_id']}")
 
         # Показываем интерфейс оплаты
         keyboard = [
@@ -945,18 +1037,24 @@ async def show_payment(update: Update, product_id: str) -> None:
                 f"<b>Сумма:</b> {amount} USDT\n\n"
                 f"1️⃣ Нажмите кнопку «Оплатить» для перехода к оплате\n"
                 f"2️⃣ Оплатите счет в течение 60 минут\n"
-                f"3️⃣ После успешной оплаты вы получите уведомление"
+                f"3️⃣ После успешной оплаты вы получите уведомление\n\n"
+                f"⚠️ Важно: После оплаты в CryptoBot не нужно возвращаться сюда и нажимать дополнительные кнопки.\n"
+                f"Система автоматически обнаружит платеж и отправит вам уведомление."
             ),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='HTML'
         )
 
     except Exception as e:
-        print(f"Ошибка при создании платежа: {e}")
+        print(f"❌ Ошибка при создании платежа: {e}")
+        print(f"Трассировка: {traceback.format_exc()}")
         await query.message.reply_text(
             "❌ Произошла ошибка при создании платежа.\n"
             "Пожалуйста, попробуйте позже или обратитесь в поддержку."
         )
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
 
 async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработка подтверждения оплаты"""
@@ -1040,7 +1138,7 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
                             current_time
                         ))
                         
-                        # Уведомляем воркера
+                        # Уведомляем воркеру
                         try:
                             await context.bot.send_message(
                                 chat_id=payment['worker_telegram_id'],
@@ -1160,7 +1258,7 @@ async def test_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stats_total = get_worker_stats(worker_id)
 
             await update.message.reply_text(
-                f"�� Тестовая оплата зачислена!\n"
+                f"✅ Тестовая оплата зачислена!\n"
                 f"💼 Воркер: {worker_code} (ID: {worker_id})\n"
                 f"👤 Посетитель: {test_visitor_id}\n"
                 f"💰 Сумма: {amount:.2f} USDT\n\n"
@@ -1385,15 +1483,20 @@ async def run_bot():
     ))
 
     # Запускаем планировщик
+    print("🕒 Запуск планировщика...")
     scheduler.start()
-    print("Планировщик запущен")
+    print("✅ Планировщик успешно запущен")
 
+    print("⏰ Добавление задачи проверки платежей...")
     scheduler.add_job(
         check_payments,
         'interval',
         seconds=30,
-        args=[application]
+        args=[application],
+        id='payment_checker',
+        replace_existing=True
     )
+    print("✅ Задача проверки платежей добавлена")
 
     # Добавляем задачу на обновление статистики в 00:00 по МСК
     scheduler.add_job(
